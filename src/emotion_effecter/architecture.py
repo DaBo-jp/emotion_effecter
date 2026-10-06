@@ -29,7 +29,9 @@ LAYERS: Mapping[str, int] = MappingProxyType({
 
     # 10 — 次元や歌詞を使う判断。互いに知らない
     "policy": 10,         # 感情 → 見た目。描画を知らない
-    "mood": 10,           # lyrics → Jev
+    "mood": 10,           # lyrics → Jev（区間ごとの感情）
+    "elements": 10,       # lyrics → Jev（曲全体の属性）
+    "casting": 10,        # 属性 + BPM → effect の候補。描画を知らない
     "structure": 10,      # lyrics + beats → 開始時刻
 
     # 20 — 判断を束ねる。互いに知らない

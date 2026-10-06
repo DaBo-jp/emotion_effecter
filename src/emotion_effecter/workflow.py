@@ -8,6 +8,9 @@
               ある曲は公開版そのものを比べる
     compare   compare.mp4（上：公開版 or base / 下：emotion）
 
+`suggest`（effect の提案）は書き出しとは別に回す。属性（Jev）は elements.json に
+残し、あれば作り直さない。
+
 `redo` に工程の名前を入れると、出力があってもやり直す。
 """
 from __future__ import annotations
@@ -21,7 +24,7 @@ from types import MappingProxyType
 from cymatics import effects
 from cymatics.dsp import audio
 
-from . import drive, lyrics, mood, policy, production, structure, timeline, video
+from . import casting, drive, elements, lyrics, mood, policy, production, structure, timeline, video
 from .beats import analyze
 from .manifest import Manifest
 
@@ -34,6 +37,7 @@ Say = Callable[[str], None]
 NAMES: Mapping[str, str] = MappingProxyType({
     "mood": "mood.json", "timed": "lyrics.timed.md", "emotion": "emotion.mp4",
     "base": "base.mp4", "compare": "compare.mp4", "previews": "previews.png",
+    "elements": "elements.json", "suggest": "suggest.md",
 })
 
 
@@ -56,6 +60,25 @@ def score(m: Manifest, o: Outputs, redo: Iterable[str], say: Say) -> list[mood.M
         mood.save(o["mood"], song, mood.score(song))
         say("score: %s" % o["mood"])
     return mood.load(o["mood"])
+
+
+def song_elements(m: Manifest, o: Outputs, redo: bool, say: Say) -> elements.Elements:
+    if redo or not Path(o["elements"]).exists():
+        song = lyrics.load(m.file("lyrics"))
+        elements.save(o["elements"], song, elements.score(song))
+        say("elements: %s" % o["elements"])
+    return elements.load(o["elements"])
+
+
+def suggest(m: Manifest, o: Outputs, redo: bool, say: Say) -> list[casting.Suggestion]:
+    """属性（Jev）と BPM → effect の候補を suggest.md に。"""
+    el = song_elements(m, o, redo, say)
+    bpm = analyze(m.file("audio")).bpm
+    ranked = casting.rank(el.scores, bpm)
+    Path(o["suggest"]).write_text(casting.report(m.title, el.scores, el.confidence, bpm,
+                                                 ranked, m.effect), encoding="utf-8")
+    say("suggest: %s" % o["suggest"])
+    return ranked
 
 
 def sections(m: Manifest, o: Outputs, redo: Iterable[str], say: Say) -> lyrics.Song:

@@ -2,6 +2,8 @@
 
     lyrics      歌詞ファイルの読み書き
     mood        Jev でセクションごとの感情を採点
+    elements    Jev で曲全体の属性（水地風金火明暗）を採点
+    casting     属性 + BPM → effect の候補
     beats       音源 → テンポ・拍・拍ごとの音色
     structure   拍 → セクションの開始時刻
     timeline    採点 → 毎フレームの感情曲線

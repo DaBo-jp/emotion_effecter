@@ -1,6 +1,7 @@
 """コマンドの入口。
 
     song      1曲を最初から最後まで（入力 music_data/<曲>/ → 出力 out/<曲>/）
+    suggest   歌詞の属性（水地風金火明暗）と BPM → effect の候補
     score     歌詞 → セクションごとの感情（Jev）
     sections  歌詞 + 音源 → 各セクションの開始時刻を歌詞に書き込む
     render    1回の書き出し（--preview で1枚）
@@ -124,6 +125,19 @@ def cmd_song(a: argparse.Namespace) -> None:
     workflow.run(m, out, steps=a.steps, redo=a.redo, jobs=a.jobs)
 
 
+def cmd_suggest(a: argparse.Namespace) -> None:
+    from . import manifest, workflow
+
+    for d in a.dirs:
+        m = manifest.load(d)
+        o = workflow.Outputs(Path(a.out or "out") / Path(d).resolve().name)
+        o.root.mkdir(parents=True, exist_ok=True)
+        ranked = workflow.suggest(m, o, a.redo, print)
+        print("  %s: %s" % (m.title, "  ".join(
+            "%s%s %.2f" % (s.name, "*" if s.cast.effect == m.effect else "", s.score)
+            for s in ranked[:a.top])))
+
+
 # ----------------------------------------------------------------- 引数
 def _add_song(sub) -> None:
     from .workflow import STEPS
@@ -138,6 +152,15 @@ def _add_song(sub) -> None:
     p.add_argument("--previews", action="store_true",
                    help="動画は作らず、セクションごとの「感情なし｜感情あり」を1枚に")
     p.set_defaults(fn=cmd_song)
+
+
+def _add_suggest(sub) -> None:
+    p = sub.add_parser("suggest", help="歌詞の属性（水地風金火明暗）と BPM → effect の候補")
+    p.add_argument("dirs", nargs="+", help="入力ディレクトリ（song.json がある）")
+    p.add_argument("--out", help="出力の親ディレクトリ。既定は out（その下に曲名）")
+    p.add_argument("--redo", action="store_true", help="属性を Jev で採点し直す")
+    p.add_argument("--top", type=int, default=3, help="画面に出す候補の数")
+    p.set_defaults(fn=cmd_suggest)
 
 
 def _add_score(sub) -> None:
@@ -200,7 +223,7 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="emotion-effecter", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for add in (_add_song, _add_score, _add_sections, _add_render, _add_produce,
+    for add in (_add_song, _add_suggest, _add_score, _add_sections, _add_render, _add_produce,
                 _add_compare):
         add(sub)
     return ap
