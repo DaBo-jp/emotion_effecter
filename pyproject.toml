@@ -1,11 +1,41 @@
 [project]
 name = "emotion_effecter"
 version = "0.1.0"
-description = ""
+description = "歌詞の感情を Jev で数値にして、cymatics の波形エフェクトを曲の流れに合わせて動かす"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "cymatics",
+    "typesafe-sdk>=0.7.2",
+]
+
+[project.scripts]
+emotion-effecter = "emotion_effecter.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+cymatics = { git = "https://github.com/DaBo-jp/cymatics.git" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+# UP031: cymatics に合わせて % 書式で揃える
+# B905 : zip の長さは呼ぶ側で揃えている
+# B008 : Policy() は frozen なので既定値に置いて安全
+ignore = ["UP031", "B905", "B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
