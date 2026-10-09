@@ -143,16 +143,24 @@ def _why(s: Suggestion) -> str:
     return " ".join("%s%+.2f" % (e, v) for e, v in top)
 
 
+def is_current(c: Cast, effect: str, params: Mapping[str, Any]) -> bool:
+    """今の土台（effect, 引数）がこの使い方か。effect 名だけでは決まらない（line の
+    scope と harmonic）ので、使い方を決める引数まで一致を見る。"""
+    return c.effect == effect and all(params.get(k) == v for k, v in c.params.items())
+
+
 def report(title: str, scores: Mapping[str, float], confidence: Mapping[str, float],
-           bpm: float, ranked: list[Suggestion], current: str | None = None) -> str:
-    """提案の Markdown。上が属性と BPM、下が候補の表（点・内訳・引数）。"""
+           bpm: float, ranked: list[Suggestion],
+           current: tuple[str, Mapping[str, Any]] | None = None) -> str:
+    """提案の Markdown。上が属性と BPM、下が候補の表（点・内訳・引数）。
+    `current` は今の土台の (effect, 引数)。"""
     lines = ["# %s — effect の提案" % title, "", "BPM %.1f" % bpm, "", "```"]
     lines += ["%-6s %.2f (%2d%%) %s" % (e, scores[e], round(100 * confidence[e]),
                                         _bar(scores[e])) for e in dims.ELEMENTS]
     lines += ["```", "", "| # | 候補 | effect | 点 | 属性 | テンポ | 内訳 | 引数 | 意図 |",
               "|---|---|---|---|---|---|---|---|---|"]
     for i, s in enumerate(ranked, 1):
-        mark = " ◀ 今" if current == s.cast.effect else ""
+        mark = " ◀ 今" if current and is_current(s.cast, *current) else ""
         args = " ".join("--%s %s" % (k.replace("_", "-"), v) for k, v in s.cast.params.items())
         lines.append("| %d | %s%s | %s | %.2f | %+.2f | %.2f | %s | %s | %s |" % (
             i, s.name, mark, s.cast.effect, s.score, s.fit, s.tempo_fit, _why(s),

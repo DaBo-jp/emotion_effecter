@@ -76,7 +76,7 @@ def suggest(m: Manifest, o: Outputs, redo: bool, say: Say) -> list[casting.Sugge
     bpm = analyze(m.file("audio")).bpm
     ranked = casting.rank(el.scores, bpm)
     Path(o["suggest"]).write_text(casting.report(m.title, el.scores, el.confidence, bpm,
-                                                 ranked, m.effect), encoding="utf-8")
+                                                 ranked, (m.effect, m.params)), encoding="utf-8")
     say("suggest: %s" % o["suggest"])
     return ranked
 

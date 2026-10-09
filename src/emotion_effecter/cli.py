@@ -126,16 +126,17 @@ def cmd_song(a: argparse.Namespace) -> None:
 
 
 def cmd_suggest(a: argparse.Namespace) -> None:
-    from . import manifest, workflow
+    from . import casting, manifest, workflow
 
     for d in a.dirs:
         m = manifest.load(d)
         o = workflow.Outputs(Path(a.out or "out") / Path(d).resolve().name)
         o.root.mkdir(parents=True, exist_ok=True)
         ranked = workflow.suggest(m, o, a.redo, print)
+        now = [casting.is_current(s.cast, m.effect, m.params) for s in ranked]
         print("  %s: %s" % (m.title, "  ".join(
-            "%s%s %.2f" % (s.name, "*" if s.cast.effect == m.effect else "", s.score)
-            for s in ranked[:a.top])))
+            "%s%s %.2f" % (s.name, "*" if cur else "", s.score)
+            for s, cur in zip(ranked[:a.top], now))))
 
 
 # ----------------------------------------------------------------- 引数

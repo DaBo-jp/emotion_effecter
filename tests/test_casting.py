@@ -60,8 +60,20 @@ def test_rank_refuses_missing_elements_listing_them():
         casting.rank({"metal": 1.0}, 120)
 
 
-def test_report_marks_current_effect():
+def test_report_marks_current_cast_by_effect_and_params():
+    """line は scope と harmonic の2つ。effect 名だけで印を付けると両方に付く。"""
     ranked = casting.rank(FLAT | {"metal": 1.0}, 120)
-    md = casting.report("T", FLAT, FLAT, 120, ranked, current="line")
-    assert "scope ◀ 今" in md and "harmonic ◀ 今" in md
-    assert md.count("◀ 今") == 2
+    md = casting.report("T", FLAT, FLAT, 120, ranked, current=("line", {"mode": "scope"}))
+    assert "scope ◀ 今" in md and "harmonic ◀ 今" not in md
+    assert md.count("◀ 今") == 1
+
+
+def test_report_marks_cast_without_params_regardless_of_other_params():
+    ranked = casting.rank(FLAT, 120)
+    md = casting.report("T", FLAT, FLAT, 120, ranked, current=("stave", {"gap": 0.3}))
+    assert "stave ◀ 今" in md and md.count("◀ 今") == 1
+
+
+def test_report_marks_nothing_without_current():
+    md = casting.report("T", FLAT, FLAT, 120, casting.rank(FLAT, 120))
+    assert "◀ 今" not in md
