@@ -41,6 +41,7 @@ music_data/<曲>/            入力。人が置くもの（元のファイル名
   歌詞_Shape.md, Shape.wav, shape.jpg, Shape_Opening.mp4 ...
 out/<曲>/                   出力。全部作り直せるもの
   mood.json                 採点（Jev）
+  pace.json                 気持ちの速さ（Jev）。song.json に tempo がある曲だけ
   lyrics.timed.md           開始時刻つきの歌詞
   emotion.mp4 (+.plan.json) 感情版（Opening / 本編 / Closing）
   base.mp4                  公開版の動画が無い曲だけ：土台の設定で感情なし
@@ -76,6 +77,18 @@ out/<曲>/                   出力。全部作り直せるもの
   "sections": {"Chorus 1": {"flow": "in", "flow_x": 0.55, "flow_y": 0.3},
                "Last-Chorus": {"flow": "out", "flow_twist": 180}}
   ```
+- `tempo` を書くと、**流れる速さと踊り（揺れ・首振り）を拍と気持ちで変える**
+  （`speed` を持つ effect＝motif / rune）。昂ぶり（arousal）と、Jev に別に聞く
+  「気持ちの速さ」（たゆたう／歩む／急く → `pace.json`）から、画面を渡りきる小節数を
+  2のべきで決める。揺れと首振りは拍の周波数に合わせる。Jev の判断なので
+  **emotion.mp4 にだけ効く**。`sections` に手で書いた `speed` などが勝つ
+
+  ```json
+  "tempo": {"bpm": 99, "bars_calm": 8, "bars_wild": 2}
+  ```
+
+  `bpm` を書かなければ音源から推定する（60〜200 の範囲で、倍・半分にずれることがある）。
+  ほかに `beats_per_bar`（4）/ `sway_beats`（4）/ `rock_beats`（2）
 - `_` で始まる鍵は注記。**知らない項目・足りない項目・無いファイルは全部並べて断る**
 
 ```
@@ -152,6 +165,9 @@ architecture  層の宣言
 dims        感情の次元の名前（採点と写像が同じ一覧を見る）
 lyrics      歌詞ファイルの読み書き
 mood        Jev でセクションごとの感情を採点。JSON に保存
+pace        Jev でセクションごとの気持ちの速さを採点（tempo のある曲だけ）
+tempo       昂ぶり + 気持ちの速さ + BPM → 流れ・踊りの速さ。純粋な計算
+scenes      セクションごとに変える層の引数（流れの向き・速さ）
 beats       音源 → テンポ・拍・拍ごとの音色
 structure   拍 → セクションの開始時刻（音源を知らない。合成データでテストできる）
 timeline    採点 → 毎フレームの感情曲線

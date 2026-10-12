@@ -82,6 +82,20 @@ def test_effects_without_flow_are_refused():
     assert "持たない" in "".join(scenes.problems({"Verse 1": {"flow": "in"}}, "stave"))
 
 
+def test_extra_is_overridden_by_song_json():
+    """`extra`（拍から出した速さ）の上に song.json を重ねる。**手で書いた値が勝つ。**"""
+    extra = [{"speed": 0.1}, {}, {"speed": 0.2, "rock_hz": 2.0}]
+    sc = scenes.build(SONG, {"Chorus 1": {"speed": 0.5}}, "motif", FPS, 0.0, extra)
+    assert [sc.at(f)[0][0] for f in (5, 15, 25)] == [
+        {"speed": 0.1}, {}, {"speed": 0.5, "rock_hz": 2.0}]
+
+
+def test_bad_extra_is_listed_with_the_rest():
+    with pytest.raises(ValueError) as e:
+        scenes.build(SONG, {"Chorus 9": {}}, "motif", FPS, 0.0, [{"speed": -1.0}, {}, {}])
+    assert "Chorus 9" in str(e.value) and "Verse 1" in str(e.value)
+
+
 def test_untimed_lyrics_are_refused():
     with pytest.raises(ValueError, match="開始時刻"):
         scenes.build(lyrics.parse("<!--\nS\n-->\n[Verse]\na\n"), {}, "motif", FPS)
@@ -151,6 +165,13 @@ def test_a_section_draws_its_own_flow(media):
     assert np.array_equal(_shot(media, None, 0.5, "v0"), _shot(media, sc, 0.5, "v1"))
 
 
+def test_a_section_draws_its_own_speed(media):
+    """速さを変えると `derive()`（渡りきるフレーム数）から作り直して描く。"""
+    base = _shot(media, None, 2.5, "s0")
+    fast = _shot(media, _sc({"Chorus 1": {"speed": 0.6, "rock_hz": 3.0}}), 2.5, "s1")
+    assert not np.array_equal(base, fast)
+
+
 def test_the_boundary_draws_both_flows(media):
     """境界の真ん中は、古い流れだけとも新しい流れだけとも違う絵。"""
     old = _shot(media, None, 2.0, "old")
@@ -180,21 +201,37 @@ def test_variant_rebuilds_stage_for_the_new_flow():
     assert drive.variant(eff.module, _Ctx(s), {}) == _Ctx(s)
 
 
-def test_base_and_emotion_share_the_sections(tmp_path, monkeypatch):
-    """**base にも sections を入れる。** compare の上下の違いを感情だけにするため。"""
+def _run_with_fakes(tmp_path, monkeypatch, tempo):
     from emotion_effecter import workflow
     got = {}
     monkeypatch.setattr(workflow, "score", lambda *a: [])
     monkeypatch.setattr(workflow, "sections", lambda *a: SONG)
     monkeypatch.setattr(workflow, "build_timeline", lambda *a: "tl")
-    monkeypatch.setattr(workflow, "build_scenes", lambda m, song: "sc")
+    monkeypatch.setattr(workflow, "build_scenes",
+                        lambda m, song, extra=None: ("sc", extra))
+    monkeypatch.setattr(workflow, "paces", lambda *a: "paces")
+    monkeypatch.setattr(workflow, "tempo_extra", lambda m, song, moods, ps, say: ps)
     monkeypatch.setattr(workflow, "produce",
                         lambda m, out, tl, o, jobs=0, sc=None: got.update({out: (tl, sc)}))
 
     @dataclass(frozen=True)
     class _M:
+        tempo: object = None
+
         def file(self, role):
             return None
 
-    o = workflow.run(_M(), tmp_path, steps=("emotion", "base"), say=lambda *_: None)
-    assert got == {o["emotion"]: ("tl", "sc"), o["base"]: (None, "sc")}
+    o = workflow.run(_M(tempo), tmp_path, steps=("emotion", "base"), say=lambda *_: None)
+    return o, got
+
+
+def test_base_and_emotion_share_the_sections(tmp_path, monkeypatch):
+    """**base にも sections を入れる。** compare の上下の違いを感情だけにするため。"""
+    o, got = _run_with_fakes(tmp_path, monkeypatch, None)
+    assert got == {o["emotion"]: ("tl", ("sc", None)), o["base"]: (None, ("sc", None))}
+
+
+def test_tempo_speeds_go_to_emotion_only(tmp_path, monkeypatch):
+    """拍と気持ちの速さは Jev の判断 ∴ **emotion にだけ**足す。base は song.json の速さ。"""
+    o, got = _run_with_fakes(tmp_path, monkeypatch, "tempo")
+    assert got == {o["emotion"]: ("tl", ("sc", "paces")), o["base"]: (None, ("sc", None))}

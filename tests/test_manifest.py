@@ -51,3 +51,20 @@ def test_every_problem_is_listed(tmp_path):
     for part in ("知らない項目: colour", "files に image が無い", "知らない役割: cover",
                  "audio が無い", "nope", "turn"):
         assert part in msg, part
+
+
+def test_tempo_is_off_unless_written(tmp_path):
+    _write(tmp_path, {**DOC, "base": {"effect": "motif"}})
+    assert manifest.load(tmp_path).tempo is None
+
+
+def test_tempo_is_read(tmp_path):
+    _write(tmp_path, {**DOC, "base": {"effect": "motif"}, "tempo": {"_note": "n", "bpm": 128}})
+    assert manifest.load(tmp_path).tempo.bpm == 128.0
+
+
+def test_tempo_needs_an_effect_with_speed_and_lists_every_problem(tmp_path):
+    _write(tmp_path, {**DOC, "base": {"effect": "stave"}, "tempo": {"bars_calm": -1}})
+    with pytest.raises(ValueError) as e:
+        manifest.load(tmp_path)
+    assert "speed を持たない" in str(e.value) and "bars_calm" in str(e.value)

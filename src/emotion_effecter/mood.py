@@ -25,7 +25,7 @@ from types import MappingProxyType
 from typesafe_sdk import AsyncTypeSafeClient, Choice, Score
 
 from . import dims
-from .lyrics import Song
+from .lyrics import Song, context
 
 #: Score で取る次元（宣言は `dims`）。値は 0..1 に正規化して持つ
 DIMS = dims.DIMS
@@ -122,17 +122,8 @@ class Mood:
 
 
 def state(song: Song, i: int) -> dict:
-    """i 番目のセクションを採点するときに Jev に渡すもの。"""
-    sec = song.sections[i]
-    prev = next((s for s in reversed(song.sections[:i]) if s.lines), None)
-    return {
-        "song": {"title": song.title, "lyrics": song.lyrics},
-        "section": {"name": sec.name,
-                    "position": "%d / %d" % (i + 1, len(song.sections)),
-                    "text": sec.text},
-        "previous": ({"name": prev.name, "text": prev.text} if prev
-                     else "（曲の最初のセクション）"),
-    }
+    """i 番目のセクションを採点するときに Jev に渡すもの（`lyrics.context`）。"""
+    return context(song, i)
 
 
 def from_response(section: str, resp) -> Mood:

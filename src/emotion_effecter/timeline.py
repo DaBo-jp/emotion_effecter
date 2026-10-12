@@ -17,11 +17,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
 from .lyrics import Song
 from .mood import DIMS, Mood
+from .pace import Pace
 
 Anchor = dict[str, float] | None
 
@@ -52,28 +54,45 @@ class Timeline:
         return self.values[self.names.index(name)]
 
 
-def anchors(song: Song, moods: Sequence[Mood]) -> list[Anchor]:
-    """セクションごとの値。歌詞の無いセクションは None。名前で順に対応づける。
+def align(song: Song, items: Sequence[Any], what: str = "採点") -> list[Any]:
+    """セクションごとの item（`.section` で名前を持つ）。歌詞の無いセクションは None。
+    名前で順に対応づける。
 
-    **対応しないものは黙って捨てない。** 採点の無いセクションも、どのセクションにも
-    当たらない採点も、全部並べて断る。
+    **対応しないものは黙って捨てない。** item の無い歌詞セクションも、どのセクションにも
+    当たらない item も、全部並べて断る。
     """
-    queue, out, missing = list(moods), [], []
+    queue, out, missing = list(items), [], []
     for sec in song.sections:
         i = next((i for i, m in enumerate(queue) if m.section == sec.name), None)
         if sec.instrumental or i is None:
             out.append(None)
             missing += [] if sec.instrumental else [sec.name]
             continue
-        m = queue.pop(i)
-        vals = {k: m.scores[k] for k in DIMS}
-        vals.update({"emo:" + k: v for k, v in m.distributions["emotion"].items()})
-        out.append(vals)
-    bad = (["採点が無い: " + n for n in missing]
-           + ["当たるセクションが無い採点: " + m.section for m in queue])
+        out.append(queue.pop(i))
+    bad = (["%sが無い: %s" % (what, n) for n in missing]
+           + ["当たるセクションが無い%s: %s" % (what, m.section) for m in queue])
     if bad:
-        raise ValueError("歌詞と採点が対応しない:\n  " + "\n  ".join(bad))
+        raise ValueError("歌詞と%sが対応しない:\n  %s" % (what, "\n  ".join(bad)))
     return out
+
+
+def _values(m: Mood, p: Pace | None) -> dict[str, float]:
+    vals = {k: m.scores[k] for k in DIMS}
+    vals.update({"emo:" + k: v for k, v in m.distributions["emotion"].items()})
+    if p is not None:
+        vals.update({"pace:" + k: v for k, v in p.probabilities.items()})
+    return vals
+
+
+def anchors(song: Song, moods: Sequence[Mood],
+            paces: Sequence[Pace] | None = None) -> list[Anchor]:
+    """セクションごとの値。歌詞の無いセクションは None。
+
+    `paces`（気持ちの速さ）を渡すと `pace:<ラベル>` の確率も入る。
+    """
+    ms = align(song, moods)
+    ps = align(song, paces, "気持ちの速さ") if paces is not None else [None] * len(ms)
+    return [None if m is None else _values(m, p) for m, p in zip(ms, ps)]
 
 
 def _fill(marks: list[Anchor], frames: list[int], n: int, key: str) -> np.ndarray:

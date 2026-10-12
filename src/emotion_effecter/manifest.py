@@ -9,7 +9,8 @@
       "base": {"preset": "shape"},          ← cymatics の preset か
               {"effect": "rune", "params": {...}},   ← effect と引数
       "policy": {"warm": "255,120,56", "turn": 0},
-      "sections": {"Chorus 1": {"flow": "in"}}   ← セクションごとの流れの向き（`scenes.py`）
+      "sections": {"Chorus 1": {"flow": "in"}},  ← セクションごとの流れの向き（`scenes.py`）
+      "tempo": {"bars_calm": 8}             ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
     }
 
 ファイル名は song.json からの相対。`opening` / `closing` / `published` は無くてもいい。
@@ -27,10 +28,11 @@ from typing import Any
 
 from . import policy as policy_mod
 from . import scenes as scenes_mod
+from . import tempo as tempo_mod
 
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published")
-KEYS = ("title", "genre", "files", "base", "policy", "sections")
+KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo")
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class Manifest:
     policy: Mapping[str, Any] = field(default_factory=dict)
     #: セクション名 → 変える引数。名前の照合は歌詞と合わせる `scenes.build()` で
     sections: Mapping[str, Any] = field(default_factory=dict)
+    #: 流れる速さを拍と気持ちで変えるか。None なら変えない（`tempo` を書いていない）
+    tempo: tempo_mod.Tempo | None = None
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -86,6 +90,21 @@ def _files(root: Path, files: Mapping[str, str]) -> tuple[dict[str, str], list[s
     return out, bad
 
 
+def _tempo_problems(doc: Mapping[str, Any], effect: str) -> list[str]:
+    """`tempo` の駄目な理由。effect が `speed` を持たなければ速さを変えようが無い。"""
+    if "tempo" not in doc:
+        return []
+    from cymatics import effects
+
+    bad = [] if any(f.name == "speed" for f in effects.get(effect).fields) else [
+        "tempo: %s は speed を持たない" % effect]
+    try:
+        tempo_mod.from_mapping(_notes_dropped(doc["tempo"]))
+    except (ValueError, AttributeError) as e:
+        bad.append("tempo: " + str(e).replace("\n  ", " / "))
+    return bad
+
+
 def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     """song.json の駄目な理由を全部。空なら通る。"""
     doc = _notes_dropped(doc)
@@ -95,6 +114,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     try:
         effect = base_of(doc.get("base", {}))[0]
         bad += ["sections: " + p for p in scenes_mod.problems(doc.get("sections", {}), effect)]
+        bad += _tempo_problems(doc, effect)
     except (ValueError, KeyError) as e:
         bad.append(str(e))
     try:
@@ -115,4 +135,5 @@ def load(root: str | Path) -> Manifest:
     effect, params = base_of(doc["base"])
     return Manifest(root, doc["title"], doc.get("genre") or None, files, effect, params,
                 _notes_dropped(doc.get("policy", {})),
-                _notes_dropped(doc.get("sections", {})))
+                _notes_dropped(doc.get("sections", {})),
+                tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None)

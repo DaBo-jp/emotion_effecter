@@ -61,6 +61,20 @@ class Song:
         return all(s.start is not None for s in self.sections)
 
 
+def context(song: Song, i: int) -> dict:
+    """i 番目のセクションを Jev に聞くときに渡すもの。曲全体の歌詞と直前の歌詞セクションも入れる。"""
+    sec = song.sections[i]
+    prev = next((s for s in reversed(song.sections[:i]) if s.lines), None)
+    return {
+        "song": {"title": song.title, "lyrics": song.lyrics},
+        "section": {"name": sec.name,
+                    "position": "%d / %d" % (i + 1, len(song.sections)),
+                    "text": sec.text},
+        "previous": ({"name": prev.name, "text": prev.text} if prev
+                     else "（曲の最初のセクション）"),
+    }
+
+
 def parse_time(text: str) -> float:
     """`1:23.5` / `83.5` → 秒。"""
     secs = 0.0

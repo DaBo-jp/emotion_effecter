@@ -1,4 +1,5 @@
-"""セクションごとに層の引数を変える。**いま変えられるのは流れの向き（`--flow`）だけ。**
+"""セクションごとに層の引数を変える。**変えられるのは流れの向き（`--flow` など）と
+流れ・踊りの速さ（`--speed` / `--sway-hz` / `--rock-hz`）。**
 
 song.json に書く:
 
@@ -13,6 +14,8 @@ song.json に書く:
   新しい流れが濃くなっていく。引数をその場で差し替えると、流れている途中の粒が
   一斉に瞬間移動する——位置は「今の向き」で経過時間から解析的に出しているから
 - 知らないセクション名・変えられない項目・範囲外の値は**全部並べて断る**
+- `build()` の `extra` で、セクションごとの引数を外から足せる（`tempo` が拍から
+  出した速さ）。**song.json に手で書いた値が勝つ**
 
 変えられる項目を `KEYS` の外へ広げるときは、包絡や帯域を作り直さずに描けるか
 （`stage()` と `derive()` の作り直しだけで済むか）を確かめてから足す。
@@ -22,7 +25,7 @@ song.json に書く:
 from __future__ import annotations
 
 from bisect import bisect_right
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -31,7 +34,8 @@ from cymatics import effects
 from .lyrics import Song
 
 #: セクションごとに変えられる項目
-KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist")
+KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist",
+                         "speed", "sway_hz", "rock_hz")
 
 Override = tuple[tuple[str, Any], ...]
 
@@ -112,18 +116,35 @@ def _override(over: Mapping[str, Any], fields) -> Override:
     return tuple(sorted((k, fields[k].coerce(v)) for k, v in _notes_dropped(over).items()))
 
 
+def _merged(song: Song, doc: Mapping[str, Any],
+            extra: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
+    """セクションごとの引数。`extra` の上に song.json の値を重ねる（手書きが勝つ）。"""
+    if extra is not None and len(extra) != len(song.sections):
+        raise ValueError("extra が %d 個に対してセクションが %d 個"
+                         % (len(extra), len(song.sections)))
+    extra = extra if extra is not None else [{}] * len(song.sections)
+    return [{**e, **_notes_dropped(doc.get(s.name, {}))}
+            for s, e in zip(song.sections, extra)]
+
+
 def build(song: Song, doc: Mapping[str, Any], effect: str, fps: int,
-          xfade: float = 2.0) -> Scenes:
-    """`song` は開始時刻つきであること。**知らないセクション名も一緒に並べて断る。**"""
+          xfade: float = 2.0, extra: Sequence[Mapping[str, Any]] | None = None) -> Scenes:
+    """`song` は開始時刻つきであること。**知らないセクション名も一緒に並べて断る。**
+
+    `extra` はセクションの順に並べた、足す引数（`doc` と同じく検証する）。
+    """
     if not song.timed:
         raise ValueError("開始時刻の無いセクションがある（sections コマンドで推定する）")
     doc = _notes_dropped(doc)
     names = {s.name for s in song.sections}
+    merged = _merged(song, doc, extra)
+    fields = {f.name: f for f in effects.get(effect).fields}
     bad = problems(doc, effect) + ["歌詞に無いセクション: %s" % n
                                    for n in doc if n not in names]
+    bad += [p for s, e in zip(song.sections, extra or ()) for p in
+            _value_problems(s.name, e, fields)]
     if bad:
         raise ValueError("sections が通らない:\n  " + "\n  ".join(bad))
-    fields = {f.name: f for f in effects.get(effect).fields}
     return Scenes(tuple(int(round(s.start * fps)) for s in song.sections),
-                  tuple(_override(doc.get(s.name, {}), fields) for s in song.sections),
+                  tuple(_override(o, fields) for o in merged),
                   int(round(xfade * fps)))

@@ -31,9 +31,11 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "policy": 10,         # 感情 → 見た目。描画を知らない
     "mood": 10,           # lyrics → Jev（区間ごとの感情）
     "elements": 10,       # lyrics → Jev（曲全体の属性）
+    "pace": 10,           # lyrics → Jev（区間ごとの気持ちの速さ）
+    "tempo": 10,          # 昂ぶり + 気持ちの速さ + BPM → 流れ・踊りの速さ。描画を知らない
     "casting": 10,        # 属性 + BPM → effect の候補。描画を知らない
     "structure": 10,      # lyrics + beats → 開始時刻
-    "scenes": 10,         # lyrics → セクションごとに変える層の引数（流れの向き）
+    "scenes": 10,         # lyrics → セクションごとに変える層の引数（流れの向き・速さ）
 
     # 20 — 判断を束ねる。互いに知らない
     "manifest": 20,       # song.json（曲の宣言）。policy で写像を検証する

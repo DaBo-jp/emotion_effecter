@@ -11,3 +11,6 @@ DIMS: tuple[str, ...] = ("arousal", "valence", "acceptance", "conflict", "domina
 
 #: 曲全体の属性（`elements`）。水・地・風・金・火・明・暗。値は 0..1
 ELEMENTS: tuple[str, ...] = ("water", "earth", "wind", "metal", "fire", "light", "dark")
+
+#: セクションごとの気持ちの速さ（`pace`）。Choice のラベル。遅い順
+PACES: tuple[str, ...] = ("linger", "walk", "rush")

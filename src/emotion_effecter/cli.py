@@ -120,7 +120,7 @@ def cmd_song(a: argparse.Namespace) -> None:
         o = workflow.Outputs(Path(out))
         o.root.mkdir(parents=True, exist_ok=True)
         moods = workflow.score(m, o, a.redo, print)
-        workflow.previews(m, o, workflow.sections(m, o, a.redo, print), moods, print)
+        workflow.previews(m, o, workflow.sections(m, o, a.redo, print), moods, print, a.redo)
         return
     workflow.run(m, out, steps=a.steps, redo=a.redo, jobs=a.jobs)
 
@@ -141,14 +141,14 @@ def cmd_suggest(a: argparse.Namespace) -> None:
 
 # ----------------------------------------------------------------- 引数
 def _add_song(sub) -> None:
-    from .workflow import STEPS
+    from .workflow import REDO, STEPS
 
     p = sub.add_parser("song", help="1曲を最初から最後まで（song.json のあるディレクトリ）")
     p.add_argument("dir", help="入力ディレクトリ（song.json がある）")
     p.add_argument("--out", help="出力ディレクトリ。既定は out/<入力ディレクトリ名>")
     p.add_argument("--steps", nargs="+", choices=STEPS, default=list(STEPS))
-    p.add_argument("--redo", nargs="+", choices=STEPS, default=[],
-                   help="出力があってもやり直す工程")
+    p.add_argument("--redo", nargs="+", choices=REDO, default=[],
+                   help="出力があってもやり直す工程（pace は気持ちの速さの採点）")
     p.add_argument("--jobs", type=int, default=0)
     p.add_argument("--previews", action="store_true",
                    help="動画は作らず、セクションごとの「感情なし｜感情あり」を1枚に")
