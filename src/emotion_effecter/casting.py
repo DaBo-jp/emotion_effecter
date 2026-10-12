@@ -76,6 +76,18 @@ CASTS: Mapping[str, Cast] = MappingProxyType({
                   "枠から内へ伸びる刃"),
     "floor": _cast("floor", {}, {"earth": 1.0, "metal": 0.4}, 130,
                    "奥へ流れる地形。手前が今、奥が過去"),
+    # motif は図形の組で性格が変わる。重みは仮置き（2026-10-12）。向き（--flow）は
+    # 曲の構図で決まるものなので候補には持たせない
+    "hearts": _cast("motif", {"shape": "heart"}, {"fire": 0.8, "light": 0.6}, 110,
+                    "踊るハート。恋・高揚"),
+    "night": _cast("motif", {"shape": "night"}, {"light": 0.7, "dark": 0.6}, 80,
+                   "星と月ときらめき。夜空・願い"),
+    "spring": _cast("motif", {"shape": "spring"}, {"wind": 0.9, "water": 0.3}, 90,
+                    "桜と花びら。舞い散る・別れと始まり"),
+    "rain": _cast("motif", {"shape": "rain"}, {"water": 1.0, "dark": 0.3}, 75,
+                  "しずくと泡。雨・涙"),
+    "music": _cast("motif", {"shape": "music"}, {"light": 0.5, "wind": 0.5}, 120,
+                   "音符。歌そのものが主役の曲"),
 })
 
 #: 候補にしない effect と理由。**黙って外さない**（テストが全 effect を数える）
