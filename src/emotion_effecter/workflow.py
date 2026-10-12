@@ -149,9 +149,9 @@ def tempo_extra(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
     """拍と気持ちから出した、セクションごとの流れ・踊りの速さ（`tempo`）。"""
     bpm = m.tempo.bpm or analyze(m.file("audio")).bpm
     fields = {f.name: f for f in effects.get(m.effect).fields}
-    base = fields["speed"].coerce(m.params.get("speed", fields["speed"].default))
-    marks = timeline.anchors(song, moods, ps)
-    extra = tempo.overrides(marks, bpm, m.tempo, fields, base)
+    base = {k: fields[k].coerce(m.params.get(k, fields[k].default))
+            for k in tempo.KEYS if k in fields}
+    extra = tempo.overrides(timeline.anchors(song, moods, ps), bpm, m.tempo, base)
     names = [None if s.instrumental else s.name for s in song.sections]
     say("tempo: %.1f BPM → %s" % (bpm, tempo.summary(names, extra, bpm, m.tempo)))
     return extra

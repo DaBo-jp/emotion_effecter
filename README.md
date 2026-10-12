@@ -42,6 +42,7 @@ music_data/<曲>/            入力。人が置くもの（元のファイル名
 out/<曲>/                   出力。全部作り直せるもの
   mood.json                 採点（Jev）
   pace.json                 気持ちの速さ（Jev）。song.json に tempo がある曲だけ
+  elements.json, suggest.md 属性（Jev）と effect の候補。suggest のときだけ
   lyrics.timed.md           開始時刻つきの歌詞
   emotion.mp4 (+.plan.json) 感情版（Opening / 本編 / Closing）
   base.mp4                  公開版の動画が無い曲だけ：土台の設定で感情なし
@@ -77,18 +78,37 @@ out/<曲>/                   出力。全部作り直せるもの
   "sections": {"Chorus 1": {"flow": "in", "flow_x": 0.55, "flow_y": 0.3},
                "Last-Chorus": {"flow": "out", "flow_twist": 180}}
   ```
-- `tempo` を書くと、**流れる速さと踊り（揺れ・首振り）を拍と気持ちで変える**
+- `tempo` を書くと、**流れる速さ・湧く数・踊り（揺れ・首振り）を拍と気持ちで変える**
   （`speed` を持つ effect＝motif / rune）。昂ぶり（arousal）と、Jev に別に聞く
   「気持ちの速さ」（たゆたう／歩む／急く → `pace.json`）から、画面を渡りきる小節数を
-  2のべきで決める。揺れと首振りは拍の周波数に合わせる。Jev の判断なので
+  決める。昂ぶりは曲の最小〜最大へ引き伸ばし（`stretch`）、小節数は1オクターブを
+  `snap` 段に刻んで丸める。湧く数は、急くほど画面に居る数が増えるように変える
+  （`density_gain`）。揺れと首振りは拍の周波数に合わせる。Jev の判断なので
   **emotion.mp4 にだけ効く**。`sections` に手で書いた `speed` などが勝つ
 
   ```json
-  "tempo": {"bpm": 99, "bars_calm": 8, "bars_wild": 2}
+  "tempo": {"bpm": 98, "bars_calm": 4, "bars_wild": 1, "rock_beats": 1, "sway_beats": 2}
   ```
 
-  `bpm` を書かなければ音源から推定する（60〜200 の範囲で、倍・半分にずれることがある）。
-  ほかに `beats_per_bar`（4）/ `sway_beats`（4）/ `rock_beats`（2）
+  | 項目 | 既定 | |
+  |---|---|---|
+  | `bpm` | 0 | 0 なら音源から推定（倍・半分にずれることがある——Irrational は 198 と出た） |
+  | `bars_calm` / `bars_wild` | 8 / 2 | 昂ぶり 0 / 1 で渡りきる小節数 |
+  | `stretch` | 1 | 昂ぶりを曲の最小〜最大へ引き伸ばす割合。0 で生の値 |
+  | `snap` | 2 | 1オクターブの刻み。1 で2のべき、2 で √2 刻み |
+  | `density_gain` | 1 | 気持ちの速さ1段で、画面に居る数を何オクターブ増減するか |
+  | `beats_per_bar` / `sway_beats` / `rock_beats` | 4 / 4 / 2 | 拍子、揺れ・首振りの1往復の拍数 |
+
+  いま使っているのは Irrational_hearts（motif のハート）だけ。上の設定でこう出る:
+
+  ```
+  tempo: 98.0 BPM → Intro 2小節 / Verse1 1.414小節 / Pre-Chorus1 0.707小節 /
+    Chorus1 1.414小節 / Verse2 2小節 / Pre-Chorus2 0.5小節 / Chorus2 2.828小節 /
+    Bridge 1小節 / Drop-Chorus 1小節 / Last-Chorus 2.828小節 / Outro 8小節
+  ```
+
+  急くサビ前で速く・数多く、サビで陶酔してゆっくりになる。写像の定数（8 / 2 小節、
+  気持ちの速さ1段で1オクターブ）は仮置き
 - `_` で始まる鍵は注記。**知らない項目・足りない項目・無いファイルは全部並べて断る**
 
 ```
@@ -97,6 +117,7 @@ uv run --env-file .env emotion-effecter song music_data/Shape              # 全
 uv run --env-file .env emotion-effecter song music_data/Shape --previews   # 静止画で確かめる
 uv run emotion-effecter song music_data/Shape --steps emotion compare      # 書き出しだけ
 uv run --env-file .env emotion-effecter song music_data/Shape --redo score # 採点し直す
+uv run --env-file .env emotion-effecter suggest music_data/*               # effect の候補
 ```
 
 採点（有料）と開始時刻は、**出力があれば作り直さない**。`--redo` で指定したものだけ
@@ -138,7 +159,8 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 
 ```
   0  architecture / dims / lyrics / beats / video
- 10  policy / mood / structure    ← 互いに知らない
+ 10  policy / mood / elements / pace / tempo / casting / structure / scenes
+                                  ← 互いに知らない
  20  manifest / timeline
  30  drive                        ← cymatics の描画とつなぐのはここだけ
  40  production
@@ -166,8 +188,10 @@ dims        感情の次元の名前（採点と写像が同じ一覧を見る�
 lyrics      歌詞ファイルの読み書き
 mood        Jev でセクションごとの感情を採点。JSON に保存
 pace        Jev でセクションごとの気持ちの速さを採点（tempo のある曲だけ）
-tempo       昂ぶり + 気持ちの速さ + BPM → 流れ・踊りの速さ。純粋な計算
-scenes      セクションごとに変える層の引数（流れの向き・速さ）
+tempo       昂ぶり + 気持ちの速さ + BPM → 流れる速さ・湧く数・踊りの速さ。純粋な計算
+scenes      セクションごとに変える層の引数（流れの向き・速さ・数）
+elements    Jev で曲全体の属性（水地風金火明暗）を採点
+casting     属性 + BPM → effect の候補。純粋な計算
 beats       音源 → テンポ・拍・拍ごとの音色
 structure   拍 → セクションの開始時刻（音源を知らない。合成データでテストできる）
 timeline    採点 → 毎フレームの感情曲線
@@ -242,8 +266,28 @@ Script での実測：Pre-Chorus の margin 7.19 に対して、間奏・Bridge�
 
 重みを変えても Jev を呼び直す必要はない（採点は JSON に残っている）。
 
-**4曲とも写像を手で決めた**——効く次元も色の行き先も曲ごとに違う。次は、ジャンル・
-歌詞・BPM から effect と色と「どの次元を何に割り当てるか」を**提案**させる。
+**写像は曲ごとに手で決めている**（Script / イセカイ / Architecture / Shape /
+Irrational）——効く次元も色の行き先も曲ごとに違う。effect の選び方は下の `suggest`
+で提案させ始めたところ。色と「どの次元を何に割り当てるか」の提案はまだ無い。
+
+### effect の提案（`elements` → `casting`、作りかけ）
+
+`emotion-effecter suggest <dir>...` は、曲全体の歌詞を Jev に7つの属性（水・地・風・
+金・火・明・暗、比喩も含む）で採点させ、BPM と合わせて effect の**使い方**を並べる
+（`out/<曲>/suggest.md`）。使い方は effect 名ではなく effect + 性格を決める引数——
+arc は棒なら後光、粒なら火花。
+
+    点 = 0.7 × 属性の合い方 + 0.3 × テンポの合い方
+
+属性の合い方は「曲の平均からの偏り × 使い方の重み」、テンポは BPM が使い方の中心から
+何オクターブ離れているかの釣鐘。今の土台には `◀ 今` が付く。今の土台の順位は
+Architecture の scope が1位、イセカイの rune が2位、Shape の smoke が6位、Script の
+stave が7位——外れる曲もある。
+
+**正解は返さない。** 並べた候補と内訳まで出して、決めるのは人。重み（`casting.CASTS`）
+は公開済みの曲から手で置いたもので、motif の5つ（hearts / night / spring / rain /
+music）は仮置き。dB レンジは曲ごとに測るもの（cymatics の `analyze`）なので出さない。
+`genre` と絵はまだ使っていない。
 
 ### cymatics は改造しない（`drive`）
 

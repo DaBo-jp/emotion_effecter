@@ -62,7 +62,8 @@ class Song:
 
 
 def context(song: Song, i: int) -> dict:
-    """i 番目のセクションを Jev に聞くときに渡すもの。曲全体の歌詞と直前の歌詞セクションも入れる。"""
+    """i 番目のセクションを Jev に聞くときに渡すもの。曲全体の歌詞と直前の歌詞セクション
+    も入れる。"""
     sec = song.sections[i]
     prev = next((s for s in reversed(song.sections[:i]) if s.lines), None)
     return {
