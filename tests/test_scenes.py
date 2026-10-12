@@ -178,3 +178,23 @@ def test_variant_rebuilds_stage_for_the_new_flow():
     c = drive.variant(eff.module, _Ctx(s), {"flow": "right"})
     assert c.work[1].kind == "right" and c.derived["flow_w"] == pytest.approx(180)
     assert drive.variant(eff.module, _Ctx(s), {}) == _Ctx(s)
+
+
+def test_base_and_emotion_share_the_sections(tmp_path, monkeypatch):
+    """**base にも sections を入れる。** compare の上下の違いを感情だけにするため。"""
+    from emotion_effecter import workflow
+    got = {}
+    monkeypatch.setattr(workflow, "score", lambda *a: [])
+    monkeypatch.setattr(workflow, "sections", lambda *a: SONG)
+    monkeypatch.setattr(workflow, "build_timeline", lambda *a: "tl")
+    monkeypatch.setattr(workflow, "build_scenes", lambda m, song: "sc")
+    monkeypatch.setattr(workflow, "produce",
+                        lambda m, out, tl, o, jobs=0, sc=None: got.update({out: (tl, sc)}))
+
+    @dataclass(frozen=True)
+    class _M:
+        def file(self, role):
+            return None
+
+    o = workflow.run(_M(), tmp_path, steps=("emotion", "base"), say=lambda *_: None)
+    assert got == {o["emotion"]: ("tl", "sc"), o["base"]: (None, "sc")}

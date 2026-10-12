@@ -5,7 +5,9 @@
               書いてあれば推定しない（手書きが勝つ）
     emotion   emotion.mp4（三段、感情あり）
     base      base.mp4（三段、感情なし）。**公開版の動画が無い曲だけ**——
-              ある曲は公開版そのものを比べる
+              ある曲は公開版そのものを比べる。`sections`（流れの向き）は
+              感情ではなく振り付けなので base にも入れる ∴ compare の上下の
+              違いは Jev の感情だけになる
     compare   compare.mp4（上：公開版 or base / 下：emotion）
 
 `suggest`（effect の提案）は書き出しとは別に回す。属性（Jev）は elements.json に
@@ -151,7 +153,10 @@ def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str,
 
 def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
              say: Say) -> str:
-    """歌詞セクションの中ほどで「感情なし｜感情あり」を並べた1枚。"""
+    """歌詞セクションの中ほどで「感情なし｜感情あり」を並べた1枚。
+
+    どちらも `sections` の流れで描く ∴ 左右の違いは感情だけ。
+    """
     tl, sc = build_timeline(m, song, moods), build_scenes(m, song)
     ends = [s.start for s in song.sections[1:]] + [audio.duration(m.file("audio"))]
     rows = []
@@ -164,7 +169,7 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
             label = "%s  %s  %s" % (sec.name.split(" - ")[0], lyrics.fmt_time(t), "  ".join(
                 "%s %.2f" % (d[:3], v[d]) for d in mood.DIMS))
             pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y)
-                    for k, x, y in (("base", None, None), ("mood", tl, sc))]
+                    for k, x, y in (("base", None, sc), ("mood", tl, sc))]
             rows.append((label, pair))
         video.sheet(rows, o["previews"])
     say("previews: %s" % o["previews"])
@@ -177,12 +182,12 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
     o.root.mkdir(parents=True, exist_ok=True)
     steps, redo = set(steps), set(redo)
     moods, song = score(m, o, redo, say), sections(m, o, redo, say)
+    sc = build_scenes(m, song)
     if "emotion" in steps:
-        produce(m, o["emotion"], build_timeline(m, song, moods), o, jobs,
-                build_scenes(m, song))
+        produce(m, o["emotion"], build_timeline(m, song, moods), o, jobs, sc)
         say("emotion: %s" % o["emotion"])
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
-        produce(m, o["base"], None, o, jobs)
+        produce(m, o["base"], None, o, jobs, sc)
         say("base: %s" % o["base"])
     if "compare" in steps:
         compare(m, o, say)

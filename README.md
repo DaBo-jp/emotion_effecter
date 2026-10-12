@@ -69,8 +69,8 @@ out/<曲>/                   出力。全部作り直せるもの
 - `sections` で**セクションごとに流れの向きを変えられる**（cymatics の `--flow` を持つ
   effect＝motif / smoke / rune）。書かないセクションは `base` のまま。境界は2秒かけて
   入れ替わる——古い流れは薄れながら流れ続け、新しい流れが濃くなる（粒が瞬間移動しない）。
-  変えられるのは `flow` / `flow_x` / `flow_y` / `flow_twist`。感情版（emotion.mp4・
-  previews）だけに効き、base.mp4 は素の設定のまま
+  変えられるのは `flow` / `flow_x` / `flow_y` / `flow_twist`。感情ではなく振り付けなので
+  **base.mp4 にも効く**——compare の上下（previews の左右）の違いは Jev の感情だけになる
 
   ```json
   "sections": {"Chorus 1": {"flow": "in", "flow_x": 0.55, "flow_y": 0.3},
