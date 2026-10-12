@@ -30,6 +30,15 @@ def test_effect_and_params_base(tmp_path):
     assert (m.effect, m.params) == ("rune", {"size": 80})
 
 
+def test_nested_params_are_passed_as_json_text(tmp_path):
+    """カーブはオブジェクトのまま書ける。cymatics へは JSON の文字列で渡る。"""
+    curve = {"points": [[0, 1], [0.5, 0.2], [1, 1]], "interp": "smooth"}
+    _write(tmp_path, {**DOC, "base": {"effect": "motif",
+                                      "params": {"mask_curve": curve, "size": 40}}})
+    m = manifest.load(tmp_path)
+    assert json.loads(m.params["mask_curve"]) == curve and m.params["size"] == 40
+
+
 def test_every_problem_is_listed(tmp_path):
     """黙って捨てない。最初の1つで止めない。"""
     doc = {**DOC, "colour": "red", "base": {"preset": "nope"},

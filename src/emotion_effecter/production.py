@@ -27,6 +27,7 @@ from cymatics.dsp import audio
 
 from . import drive, video
 from .policy import Policy
+from .scenes import Scenes
 from .timeline import Timeline
 
 #: 区間1つの長さ（秒）。fps を掛けて整数になる長さにする
@@ -61,13 +62,15 @@ def sha256(path: str) -> str:
 
 
 def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chunk],
-           sources: Mapping[str, str | None], mood: bool) -> dict[str, Any]:
+           sources: Mapping[str, str | None], mood: bool,
+           sc: Scenes | None = None) -> dict[str, Any]:
     """再現の記録。JSON にそのまま落ちる形。"""
     return {
         "versions": {p: version(p) for p in ("emotion_effecter", "cymatics", "typesafe-sdk")},
         "sources": {k: {"path": v, "sha256": sha256(v)} for k, v in sources.items() if v},
         "mood": mood,
         "policy": pol.to_dict(),
+        "scenes": sc.to_dict() if sc is not None else None,
         "spec": {k: v for k, v in spec.items() if k not in ("out", "preview")},
         "cut": asdict(c),
         "chunks": [{"f0": ch.f0, "frames": ch.frames} for ch in chunks],
@@ -89,7 +92,8 @@ def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None
 def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: str, *,
             opening: str | None = None, closing: str | None = None,
             pol: Policy = Policy(), jobs: int = 0, chunk_seconds: int = CHUNK_SECONDS,
-            sources: Mapping[str, str | None] | None = None) -> dict[str, Any]:
+            sources: Mapping[str, str | None] | None = None,
+            scenes: Scenes | None = None) -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。"""
     pol.check()
     spec = effects.get(effect).spec_from(**{**params, "out": out})
@@ -97,12 +101,12 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
     size = chunk_seconds * c.fps if drive.chunk_safe(effect) else c.body1 - c.body0
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
         chunks = drive.plan_chunks(c.body0, c.body1, size, tmp)
-        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs)
+        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes)
         silent = _assemble(parts, c, opening, closing, tmp)
         video.mux(silent, spec["audio"], out, c.total / c.fps)
     src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
            "closing": closing, **(sources or {})}
-    rec = record(spec, pol, c, chunks, src, tl is not None)
+    rec = record(spec, pol, c, chunks, src, tl is not None, scenes)
     with open(out + ".plan.json", "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=2)
     return rec

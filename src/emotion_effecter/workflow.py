@@ -24,7 +24,19 @@ from types import MappingProxyType
 from cymatics import effects
 from cymatics.dsp import audio
 
-from . import casting, drive, elements, lyrics, mood, policy, production, structure, timeline, video
+from . import (
+    casting,
+    drive,
+    elements,
+    lyrics,
+    mood,
+    policy,
+    production,
+    scenes,
+    structure,
+    timeline,
+    video,
+)
 from .beats import analyze
 from .manifest import Manifest
 
@@ -107,14 +119,19 @@ def build_timeline(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
     return timeline.build(song, moods, audio.duration(m.file("audio")), fps_of(m), xfade)
 
 
+def build_scenes(m: Manifest, song: lyrics.Song, xfade: float = 2.0) -> scenes.Scenes:
+    """song.json の `sections` → セクションごとに変える引数。境界は感情と同じ秒数で移る。"""
+    return scenes.build(song, m.sections, m.effect, fps_of(m), xfade)
+
+
 def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
-            jobs: int = 0) -> None:
+            jobs: int = 0, sc: scenes.Scenes | None = None) -> None:
     params = {**m.params, "audio": m.file("audio"), "image": m.file("image")}
     sources = {"lyrics": m.file("lyrics"), "mood": o["mood"] if tl else None,
                "manifest": str(m.root / "song.json")}
     production.produce(m.effect, params, tl, out, opening=m.file("opening"),
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
-                       jobs=jobs, sources=sources)
+                       jobs=jobs, sources=sources, scenes=sc)
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:
@@ -124,17 +141,18 @@ def compare(m: Manifest, o: Outputs, say: Say) -> None:
     say("compare: %s" % o["compare"])
 
 
-def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str) -> str:
+def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str,
+          sc: scenes.Scenes | None = None) -> str:
     params = {**m.params, "audio": m.file("audio"), "image": m.file("image"),
               "out": png + ".mp4", "preview": png, "preview_at": t}
-    drive.render(m.effect, params, tl, policy.from_mapping(m.policy))
+    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc)
     return png
 
 
 def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
              say: Say) -> str:
     """歌詞セクションの中ほどで「感情なし｜感情あり」を並べた1枚。"""
-    tl = build_timeline(m, song, moods)
+    tl, sc = build_timeline(m, song, moods), build_scenes(m, song)
     ends = [s.start for s in song.sections[1:]] + [audio.duration(m.file("audio"))]
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -145,8 +163,8 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
             v = tl.frame(int(t * tl.fps))
             label = "%s  %s  %s" % (sec.name.split(" - ")[0], lyrics.fmt_time(t), "  ".join(
                 "%s %.2f" % (d[:3], v[d]) for d in mood.DIMS))
-            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k))
-                    for k, x in (("base", None), ("mood", tl))]
+            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y)
+                    for k, x, y in (("base", None, None), ("mood", tl, sc))]
             rows.append((label, pair))
         video.sheet(rows, o["previews"])
     say("previews: %s" % o["previews"])
@@ -160,7 +178,8 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
     steps, redo = set(steps), set(redo)
     moods, song = score(m, o, redo, say), sections(m, o, redo, say)
     if "emotion" in steps:
-        produce(m, o["emotion"], build_timeline(m, song, moods), o, jobs)
+        produce(m, o["emotion"], build_timeline(m, song, moods), o, jobs,
+                build_scenes(m, song))
         say("emotion: %s" % o["emotion"])
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
         produce(m, o["base"], None, o, jobs)

@@ -62,8 +62,20 @@ out/<曲>/                   出力。全部作り直せるもの
 ```
 
 - `base` は cymatics の preset（`{"preset": ...}`）か、effect と引数
-  （`{"effect": "rune", "params": {...}}`）
+  （`{"effect": "rune", "params": {...}}`）。濃さのカーブ（`mask_curve` / motif の
+  `alpha_curve`）は**オブジェクトのまま書ける**——`"mask_curve": {"points": [[0, 1],
+  [0.5, 0.2], [1, 1]], "interp": "smooth"}`。cymatics へは JSON の文字列で渡る
 - `opening` / `closing` / `published` は無くてもいい
+- `sections` で**セクションごとに流れの向きを変えられる**（cymatics の `--flow` を持つ
+  effect＝motif / smoke / rune）。書かないセクションは `base` のまま。境界は2秒かけて
+  入れ替わる——古い流れは薄れながら流れ続け、新しい流れが濃くなる（粒が瞬間移動しない）。
+  変えられるのは `flow` / `flow_x` / `flow_y` / `flow_twist`。感情版（emotion.mp4・
+  previews）だけに効き、base.mp4 は素の設定のまま
+
+  ```json
+  "sections": {"Chorus 1": {"flow": "in", "flow_x": 0.55, "flow_y": 0.3},
+               "Last-Chorus": {"flow": "out", "flow_twist": 180}}
+  ```
 - `_` で始まる鍵は注記。**知らない項目・足りない項目・無いファイルは全部並べて断る**
 
 ```

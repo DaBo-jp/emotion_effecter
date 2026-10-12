@@ -8,7 +8,8 @@
                 "published": "Shape.mp4"},
       "base": {"preset": "shape"},          ← cymatics の preset か
               {"effect": "rune", "params": {...}},   ← effect と引数
-      "policy": {"warm": "255,120,56", "turn": 0}
+      "policy": {"warm": "255,120,56", "turn": 0},
+      "sections": {"Chorus 1": {"flow": "in"}}   ← セクションごとの流れの向き（`scenes.py`）
     }
 
 ファイル名は song.json からの相対。`opening` / `closing` / `published` は無くてもいい。
@@ -25,10 +26,11 @@ from pathlib import Path
 from typing import Any
 
 from . import policy as policy_mod
+from . import scenes as scenes_mod
 
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published")
-KEYS = ("title", "genre", "files", "base", "policy")
+KEYS = ("title", "genre", "files", "base", "policy", "sections")
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,8 @@ class Manifest:
     effect: str
     params: Mapping[str, Any]
     policy: Mapping[str, Any] = field(default_factory=dict)
+    #: セクション名 → 変える引数。名前の照合は歌詞と合わせる `scenes.build()` で
+    sections: Mapping[str, Any] = field(default_factory=dict)
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -48,6 +52,16 @@ class Manifest:
 
 def _notes_dropped(doc: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in doc.items() if not k.startswith("_")}
+
+
+def _flat(params: Mapping[str, Any]) -> dict[str, Any]:
+    """入れ子の値（`mask_curve` のカーブなど）は JSON の文字列にして渡す。
+
+    cymatics はカーブを JSON の文字列で受ける。song.json ではフロントが書き出した
+    オブジェクトをそのまま置けるように、ここで文字列へ寄せる。
+    """
+    return {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
+            for k, v in params.items()}
 
 
 def base_of(doc: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -58,7 +72,7 @@ def base_of(doc: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     if set(doc) == {"preset"}:
         return presets.get(doc["preset"])
     if "effect" in doc and set(doc) <= {"effect", "params"}:
-        return doc["effect"], dict(doc.get("params", {}))
+        return doc["effect"], _flat(doc.get("params", {}))
     raise ValueError('base は {"preset": 名前} か {"effect": 名前, "params": {...}}（%s）'
                      % ", ".join(sorted(doc)))
 
@@ -79,7 +93,8 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad += ["%s が無い" % k for k in ("title", "files", "base") if k not in doc]
     bad += _files(root, doc.get("files", {}))[1]
     try:
-        base_of(doc.get("base", {}))
+        effect = base_of(doc.get("base", {}))[0]
+        bad += ["sections: " + p for p in scenes_mod.problems(doc.get("sections", {}), effect)]
     except (ValueError, KeyError) as e:
         bad.append(str(e))
     try:
@@ -99,4 +114,5 @@ def load(root: str | Path) -> Manifest:
     files, _ = _files(root, doc["files"])
     effect, params = base_of(doc["base"])
     return Manifest(root, doc["title"], doc.get("genre") or None, files, effect, params,
-                _notes_dropped(doc.get("policy", {})))
+                _notes_dropped(doc.get("policy", {})),
+                _notes_dropped(doc.get("sections", {})))

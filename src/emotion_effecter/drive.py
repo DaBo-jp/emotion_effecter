@@ -7,6 +7,9 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
 
 - 宣言・stage()・導出値・包絡は元の effect のまま ∴ Spec の検証も同じ
 - 差し替えはフレーム番号だけで決まる ∴ 分割書き出しでも同じ絵
+- セクションごとに変える引数（`scenes.Scenes`）があれば、その引数で `stage()` と
+  導出値を作り直した ctx で描く。境界では古い引数と新しい引数で2回描き、
+  濃さ（`fr.wa`）を分け合う
   （ただし包絡が streaming の effect は cymatics 側が区間依存。`chunk_safe()`）
 """
 from __future__ import annotations
@@ -24,6 +27,7 @@ from cymatics import effects
 from cymatics.render import pipeline
 
 from .policy import Look, Policy, look
+from .scenes import Scenes
 from .timeline import Timeline
 
 
@@ -36,16 +40,39 @@ def apply(ctx, fr, lk: Look):
     return replace(ctx, col=lk.color, s=s), replace(fr, levels=levels)
 
 
-def wrap(eff: effects.Effect, tl: Timeline, pol: Policy) -> effects.Effect:
+def variant(m, ctx, over: Mapping[str, Any]):
+    """引数を `over` で差し替えた ctx。`derive()` と `stage()` を作り直す。"""
+    if not over:
+        return ctx
+    s = {**ctx.s, **over}
+    fn = getattr(m, "derive", None)
+    d = {**ctx.derived, **(fn(s, ctx.w, ctx.h, {}) if fn else {})}
+    c = replace(ctx, s=s, derived=d)
+    return replace(c, work=m.stage(c))
+
+
+def in_scenes(m, img, ctx, fr, parts):
+    """セクションの引数ごとに描き重ねる。濃さは `fr.wa` に掛けて分け合う。"""
+    for over, k in parts:
+        f = fr if k == 1.0 else replace(fr, wa=fr.wa * k)
+        img = m.draw(img, variant(m, ctx, over), f) or img
+    return img
+
+
+def wrap(eff: effects.Effect, tl: Timeline | None, pol: Policy,
+         sc: Scenes | None = None) -> effects.Effect:
     """`draw()` だけ包んだ effect。他の属性は元のモジュールのものをそのまま持つ。"""
     mod = types.ModuleType("mood_" + eff.name)
     mod.__dict__.update({k: v for k, v in vars(eff.module).items()
                          if not k.startswith("__")})
-    inner = eff.module.draw
+    inner = eff.module
 
     def draw(img, ctx, fr):
-        c, f = apply(ctx, fr, look(tl.frame(fr.f), fr.t, ctx.col, pol))
-        return inner(img, c, f)
+        if tl is not None:
+            ctx, fr = apply(ctx, fr, look(tl.frame(fr.f), fr.t, ctx.col, pol))
+        if sc is None:
+            return inner.draw(img, ctx, fr)
+        return in_scenes(inner, img, ctx, fr, sc.at(fr.f))
 
     mod.draw = draw
     return replace(eff, module=mod)
@@ -57,15 +84,17 @@ def chunk_safe(effect: str) -> bool:
 
 
 def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
-           pol: Policy = Policy()):
-    """平らな Spec 1つで書き出す。`tl=None` なら感情なし（素の cymatics と同じ）。
+           pol: Policy = Policy(), sc: Scenes | None = None):
+    """平らな Spec 1つで書き出す。`tl=None` かつ `sc=None` なら素の cymatics と同じ。
 
     Spec の検証は cymatics の `pipeline.render()` が、Policy の検証はここがする。
     """
     pol.check()
     eff = effects.get(effect)
     s = eff.spec_from(**params)
-    return pipeline.render(wrap(eff, tl, pol) if tl else eff, s)
+    if sc is not None and sc.is_plain:
+        sc = None
+    return pipeline.render(wrap(eff, tl, pol, sc) if tl or sc else eff, s)
 
 
 # ------------------------------------------------------------- 区間に分けて書く
@@ -88,17 +117,18 @@ def plan_chunks(f0: int, f1: int, size: int, workdir: str) -> list[Chunk]:
 
 
 def _render_chunk(job) -> str:
-    effect, params, tl, pol, chunk = job
+    effect, params, tl, pol, sc, chunk = job
     fps = int(params["fps"])
     p = {**params, **chunk.window(fps), "out": chunk.path, "no_audio": True}
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
-        render(effect, p, tl, pol)
+        render(effect, p, tl, pol, sc)
     return chunk.path
 
 
 def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
-                  chunks: list[Chunk], pol: Policy = Policy(), jobs: int = 0) -> list[str]:
+                  chunks: list[Chunk], pol: Policy = Policy(), jobs: int = 0,
+                  sc: Scenes | None = None) -> list[str]:
     """区間ごとに並列で書き出す（音なし）。戻り値は区間の動画、順番どおり。
 
     precomputed の包絡は初回にキャッシュへ書かれるので、先に1枚描いて温めておく
@@ -108,8 +138,8 @@ def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
         render(effect, {**params, "preview": chunks[0].path + ".warm.png",
-                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol)
+                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc)
     os.remove(chunks[0].path + ".warm.png")
-    work = [(effect, params, tl, pol, c) for c in chunks]
+    work = [(effect, params, tl, pol, sc, c) for c in chunks]
     with ProcessPoolExecutor(max_workers=jobs or min(len(chunks), os.cpu_count() or 1)) as ex:
         return list(ex.map(_render_chunk, work))
