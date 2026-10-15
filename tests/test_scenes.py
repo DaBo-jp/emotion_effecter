@@ -180,6 +180,16 @@ def test_a_section_draws_its_own_gravity(media):
     assert np.array_equal(_shot(media, None, 0.5, "g2"), _shot(media, sc, 0.5, "g3"))
 
 
+def test_a_section_draws_its_own_shape(media):
+    """図形を変えると `stage()` から作り直して描く（星で集まり、火花で弾ける）。"""
+    sc = _sc({"Chorus 1": {"shape": "spark", "align": True}})
+    assert not np.array_equal(_shot(media, None, 2.5, "h0"), _shot(media, sc, 2.5, "h1"))
+
+
+def test_bad_shape_is_listed():
+    assert "cat" in "".join(scenes.problems({"Verse 1": {"shape": "cat"}}, "motif"))
+
+
 def test_gravity_is_refused_for_effects_without_it():
     assert "持たない" in "".join(scenes.problems({"Verse 1": {"gravity": 40}}, "smoke"))
 
