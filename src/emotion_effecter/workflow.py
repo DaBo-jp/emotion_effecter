@@ -141,7 +141,7 @@ def build_timeline(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
 def build_scenes(m: Manifest, song: lyrics.Song, xfade: float = 2.0,
                  extra: list[dict] | None = None) -> scenes.Scenes:
     """song.json の `sections` → セクションごとに変える引数。境界は感情と同じ秒数で移る。"""
-    return scenes.build(song, m.sections, m.effect, fps_of(m), xfade, extra)
+    return scenes.build(song, m.sections, m.effect, fps_of(m), xfade, extra, m.params)
 
 
 def tempo_extra(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],

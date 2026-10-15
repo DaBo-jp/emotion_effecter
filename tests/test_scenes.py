@@ -90,6 +90,29 @@ def test_extra_is_overridden_by_song_json():
         {"speed": 0.1}, {}, {"speed": 0.5, "rock_hz": 2.0}]
 
 
+def test_density_multiplies_the_tempo_rate_not_replaces_it():
+    """**倍率は拍から出した数の上に掛かる**（手で rate を書くと潰れる）。"""
+    extra = [{"rate": 4.0}, {"rate": 8.0}, {}]
+    doc = {"Verse 1": {"density": 2}, "Chorus 1": {"density": 3}}
+    sc = scenes.build(SONG, doc, "motif", FPS, 0.0, extra, {"rate": 5.0})
+    assert [sc.at(f)[0][0].get("rate") for f in (5, 15, 25)] == [8.0, 8.0, 15.0]
+    assert all("density" not in o for o, _ in sc.at(5))
+
+
+def test_density_without_base_uses_the_field_default():
+    from cymatics import effects as eff
+    rate = {f.name: f for f in eff.get("motif").fields}["rate"].default
+    sc = scenes.build(SONG, {"Verse 1": {"density": 2}}, "motif", FPS, 0.0)
+    assert sc.at(5)[0][0] == {"rate": rate * 2}
+
+
+def test_bad_density_is_listed():
+    msg = "".join(scenes.problems({"Verse 1": {"density": 0}, "Bridge": {"density": "x"}},
+                                  "motif"))
+    assert "Verse 1: density" in msg and "Bridge: density" in msg
+    assert "rate を持たない" in "".join(scenes.problems({"Verse 1": {"density": 2}}, "stave"))
+
+
 def test_bad_extra_is_listed_with_the_rest():
     with pytest.raises(ValueError) as e:
         scenes.build(SONG, {"Chorus 9": {}}, "motif", FPS, 0.0, [{"speed": -1.0}, {}, {}])

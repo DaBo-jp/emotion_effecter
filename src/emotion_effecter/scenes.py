@@ -21,6 +21,9 @@ song.json に書く:
 - 知らないセクション名・変えられない項目・範囲外の値は**全部並べて断る**
 - `build()` の `extra` で、セクションごとの引数を外から足せる（`tempo` が拍から
   出した速さ）。**song.json に手で書いた値が勝つ**
+- **倍率で書ける項目がある**（`SCALES`）。`"density": 2` は湧く数（`rate`）を2倍に
+  する——手で `rate` を書くと `tempo` が拍から出した数を潰すが、倍率ならその上に
+  掛かる（無ければ `base` の値に掛かる）。火花の区間だけ密にする、など
 
 変えられる項目を `KEYS` の外へ広げるときは、包絡や帯域を作り直さずに描けるか
 （`stage()` と `derive()` の作り直しだけで済むか）を確かめてから足す。
@@ -32,6 +35,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from cymatics import effects
@@ -42,6 +46,9 @@ from .lyrics import Song
 KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist",
                          "speed", "rate", "sway_hz", "rock_hz", "gravity",
                          "shape", "align")
+
+#: 倍率で書ける項目 → 掛ける先の項目
+SCALES: Mapping[str, str] = MappingProxyType({"density": "rate"})
 
 Override = tuple[tuple[str, Any], ...]
 
@@ -92,8 +99,11 @@ def _value_problems(name: str, over: Mapping[str, Any], fields) -> list[str]:
     """1セクションぶんの引数の駄目な理由。"""
     bad = []
     for k, v in _notes_dropped(over).items():
-        if k not in KEYS:
-            bad.append("%s: %s は変えられない（%s）" % (name, k, " / ".join(KEYS)))
+        if k in SCALES:
+            bad += _scale_problems(name, k, v, fields)
+        elif k not in KEYS:
+            bad.append("%s: %s は変えられない（%s）"
+                       % (name, k, " / ".join((*KEYS, *SCALES))))
         elif k not in fields:
             bad.append("%s: この effect は %s を持たない" % (name, k))
         else:
@@ -118,13 +128,34 @@ def problems(doc: Mapping[str, Any], effect: str) -> list[str]:
     return bad
 
 
+def _scale_problems(name: str, k: str, v: Any, fields) -> list[str]:
+    if SCALES[k] not in fields:
+        return ["%s: この effect は %s を持たない（%s は %s の倍率）"
+                % (name, SCALES[k], k, SCALES[k])]
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+        return ["%s: %s=%r は 0 より大きい数" % (name, k, v)]
+    return []
+
+
+def _scaled(over: Mapping[str, Any], base: Mapping[str, Any], fields) -> dict[str, Any]:
+    """倍率（`SCALES`）を掛ける先の値に直す。先はセクションの値、無ければ `base`。"""
+    out = dict(over)
+    for k, target in SCALES.items():
+        if k in out:
+            f = fields[target]
+            ref = f.coerce(out.get(target, base.get(target, f.default)))
+            out[target] = ref * float(out.pop(k))
+    return out
+
+
 def _override(over: Mapping[str, Any], fields) -> Override:
     return tuple(sorted((k, fields[k].coerce(v)) for k, v in _notes_dropped(over).items()))
 
 
 def _merged(song: Song, doc: Mapping[str, Any],
             extra: Sequence[Mapping[str, Any]] | None) -> list[dict[str, Any]]:
-    """セクションごとの引数。`extra` の上に song.json の値を重ねる（手書きが勝つ）。"""
+    """セクションごとの引数。`extra` の上に song.json の値を重ねる（手書きが勝つ）。
+    倍率はまだ掛けない（検証のあとで `_scaled()`）。"""
     if extra is not None and len(extra) != len(song.sections):
         raise ValueError("extra が %d 個に対してセクションが %d 個"
                          % (len(extra), len(song.sections)))
@@ -134,10 +165,12 @@ def _merged(song: Song, doc: Mapping[str, Any],
 
 
 def build(song: Song, doc: Mapping[str, Any], effect: str, fps: int,
-          xfade: float = 2.0, extra: Sequence[Mapping[str, Any]] | None = None) -> Scenes:
+          xfade: float = 2.0, extra: Sequence[Mapping[str, Any]] | None = None,
+          base: Mapping[str, Any] | None = None) -> Scenes:
     """`song` は開始時刻つきであること。**知らないセクション名も一緒に並べて断る。**
 
     `extra` はセクションの順に並べた、足す引数（`doc` と同じく検証する）。
+    `base` は effect の元の引数（倍率を掛ける先が、セクションにも `extra` にも無いとき）。
     """
     if not song.timed:
         raise ValueError("開始時刻の無いセクションがある（sections コマンドで推定する）")
@@ -152,5 +185,5 @@ def build(song: Song, doc: Mapping[str, Any], effect: str, fps: int,
     if bad:
         raise ValueError("sections が通らない:\n  " + "\n  ".join(bad))
     return Scenes(tuple(int(round(s.start * fps)) for s in song.sections),
-                  tuple(_override(o, fields) for o in merged),
+                  tuple(_override(_scaled(o, base or {}, fields), fields) for o in merged),
                   int(round(xfade * fps)))
