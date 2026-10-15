@@ -1,5 +1,9 @@
 """セクションごとに層の引数を変える。**変えられるのは流れの向き（`--flow` など）と
-流れ・踊りの速さと湧く数（`--speed` / `--rate` / `--sway-hz` / `--rock-hz`）。**
+流れ・踊りの速さと湧く数（`--speed` / `--rate` / `--sway-hz` / `--rock-hz`）と
+落下（motif の `--gravity`）。**
+
+落下は経過時間の2乗で効く ∴ 集まる（in）・ゆっくり渡る区間では 0 にしないと
+真下へ落ちるだけになる——火花を外へ散らす区間でだけ立てる。
 
 song.json に書く:
 
@@ -35,7 +39,7 @@ from .lyrics import Song
 
 #: セクションごとに変えられる項目
 KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist",
-                         "speed", "rate", "sway_hz", "rock_hz")
+                         "speed", "rate", "sway_hz", "rock_hz", "gravity")
 
 Override = tuple[tuple[str, Any], ...]
 

@@ -172,6 +172,18 @@ def test_a_section_draws_its_own_speed(media):
     assert not np.array_equal(base, fast)
 
 
+def test_a_section_draws_its_own_gravity(media):
+    """火花を散らす区間でだけ落とす。前のセクションは落ちない。"""
+    sc = _sc({"Chorus 1": {"flow": "out", "gravity": 400.0}})
+    out = _sc({"Chorus 1": {"flow": "out"}})
+    assert not np.array_equal(_shot(media, out, 2.5, "g0"), _shot(media, sc, 2.5, "g1"))
+    assert np.array_equal(_shot(media, None, 0.5, "g2"), _shot(media, sc, 0.5, "g3"))
+
+
+def test_gravity_is_refused_for_effects_without_it():
+    assert "持たない" in "".join(scenes.problems({"Verse 1": {"gravity": 40}}, "smoke"))
+
+
 def test_the_boundary_draws_both_flows(media):
     """境界の真ん中は、古い流れだけとも新しい流れだけとも違う絵。"""
     old = _shot(media, None, 2.0, "old")
