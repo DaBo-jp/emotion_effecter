@@ -251,7 +251,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
     got = {}
     monkeypatch.setattr(workflow, "score", lambda *a: [])
     monkeypatch.setattr(workflow, "sections", lambda *a: SONG)
-    monkeypatch.setattr(workflow, "build_timeline", lambda *a: "tl")
+    monkeypatch.setattr(workflow, "build_timeline", lambda *a, **k: "tl")
     monkeypatch.setattr(workflow, "build_scenes",
                         lambda m, song, extra=None: ("sc", extra))
     monkeypatch.setattr(workflow, "paces", lambda *a: "paces")

@@ -11,8 +11,12 @@
       "policy": {"warm": "255,120,56", "turn": 0},
       "sections": {"Chorus 1": {"flow": "in"}},  ← セクションごとの流れの向き（`scenes.py`）
       "tempo": {"bars_calm": 8},            ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
-      "overlays": [{"effect": "crowd", ...}]  ← 主役の上や下に重ねる層（`overlay.py`）
+      "overlays": [{"effect": "crowd", ...}],  ← 主役の上や下に重ねる層（`overlay.py`）
+      "audience": {"lead": 12.3, "spread": 2}  ← 聴衆の映像の時刻合わせと取り方（無くてもいい）
     }
+
+`files.audience`（聴衆の映像）があれば、聴衆の盛り上がり（`hype`）で見た目を
+動かせる。無いのに `hype` を使っていたら断る。
 
 ファイル名は song.json からの相対。`opening` / `closing` / `published` は無くてもいい。
 `_` で始まる鍵は注記として読み飛ばす。**知らない項目・足りない項目・無いファイルは
@@ -27,14 +31,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import dims
 from . import overlay as overlay_mod
 from . import policy as policy_mod
 from . import scenes as scenes_mod
 from . import tempo as tempo_mod
 
 FILES_REQUIRED = ("lyrics", "audio", "image")
-FILES_OPTIONAL = ("opening", "closing", "published")
-KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays")
+FILES_OPTIONAL = ("opening", "closing", "published", "audience")
+KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
+        "audience")
+#: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
+AUDIENCE_KEYS = ("lead", "spread")
 
 
 @dataclass(frozen=True)
@@ -53,6 +61,10 @@ class Manifest:
     tempo: tempo_mod.Tempo | None = None
     #: 主役の上や下に重ねる層。書いていなければ空（素の1枚）
     overlays: tuple[overlay_mod.Overlay, ...] = ()
+    #: 聴衆の映像の時刻合わせ（秒）。None なら音で合わせる
+    lead: float | None = None
+    #: 聴衆の映像から、セクションの中ほどの前後何秒からも取るか
+    spread: float = 2.0
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -84,6 +96,27 @@ def _files(root: Path, files: Mapping[str, str]) -> tuple[dict[str, str], list[s
     return out, bad
 
 
+def _audience_problems(doc: Mapping[str, Any]) -> list[str]:
+    """`audience` の書き方と、聴衆の軸を映像なしで使っていないか。"""
+    cfg = _notes_dropped(doc.get("audience", {}))
+    bad = ["audience の知らない項目: %s" % k for k in sorted(set(cfg) - set(AUDIENCE_KEYS))]
+    bad += ["audience.%s は数" % k for k in AUDIENCE_KEYS
+            if k in cfg and (not isinstance(cfg[k], (int, float)) or isinstance(cfg[k], bool))]
+    if "spread" in cfg and not bad and cfg["spread"] < 0:
+        bad.append("audience.spread は 0 以上")
+    if "audience" in doc.get("files", {}):
+        return bad
+    used = [k for k, v in _notes_dropped(doc.get("policy", {})).items()
+            if k in policy_mod.BY and v in dims.AUDIENCE]
+    used += ["overlays の moods.%s" % k for ov in doc.get("overlays", [])
+             if isinstance(ov, Mapping)
+             for k, sw in _notes_dropped(ov.get("moods", {})).items()
+             if isinstance(sw, Mapping) and sw.get("by") in dims.AUDIENCE]
+    bad += ["%s が聴衆の軸を使っているのに files.audience（聴衆の映像）が無い" % u
+            for u in used]
+    return bad + (["audience を書いたのに files.audience が無い"] if cfg else [])
+
+
 def _tempo_problems(doc: Mapping[str, Any], effect: str) -> list[str]:
     """`tempo` の駄目な理由。effect が `speed` を持たなければ速さを変えようが無い。"""
     if "tempo" not in doc:
@@ -112,11 +145,18 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     except (ValueError, KeyError) as e:
         bad.append(str(e))
     bad += overlay_mod.problems(doc.get("overlays", []))
+    bad += _audience_problems(doc)
     try:
         policy_mod.from_mapping(_notes_dropped(doc.get("policy", {})))
     except ValueError as e:
         bad.append("policy: " + str(e).replace("\n  ", " / "))
     return bad
+
+
+def _audience_of(doc: Mapping[str, Any]) -> tuple[float | None, float]:
+    cfg = _notes_dropped(doc.get("audience", {}))
+    lead = cfg.get("lead")
+    return (None if lead is None else float(lead)), float(cfg.get("spread", 2.0))
 
 
 def load(root: str | Path) -> Manifest:
@@ -132,4 +172,5 @@ def load(root: str | Path) -> Manifest:
                 _notes_dropped(doc.get("policy", {})),
                 _notes_dropped(doc.get("sections", {})),
                 tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None,
-                overlay_mod.from_list(doc.get("overlays", [])))
+                overlay_mod.from_list(doc.get("overlays", [])),
+                *_audience_of(doc))

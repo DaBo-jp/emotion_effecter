@@ -13,7 +13,8 @@
 
 **どの次元で動かすかは曲ごとに選べる。** 曲によって物語の軸が違う——Script /
 イセカイ / Shape は受容、Architecture は主導権。`color_invert` で向きを返せる
-（主導権を手放すほど `warm` へ、など）。次元の名前は `dims.DIMS` から選ぶ。
+（主導権を手放すほど `warm` へ、など）。次元の名前は `dims.AXES` から選ぶ——
+聴衆の映像を採点した曲では、聴衆の盛り上がり（`hype`）でも動かせる。
 
 **動かさないときは値に触らない。** 色を HSV に開いて閉じると丸めで1ずれうるので、
 寄せる量や回す角度が 0 のときは元の色をそのまま返す。∴ 中立な Policy で包んだ
@@ -33,14 +34,14 @@ from typing import Any
 from cymatics.model import palette
 from cymatics.model.color import parse as parse_color
 
-from .dims import DIMS
+from .dims import AXES
 
 RGB = tuple[int, ...]
 
 
 @dataclass(frozen=True)
 class Policy:
-    #: 各見た目を動かす次元（`dims.DIMS` のどれか）
+    #: 各見た目を動かす次元（`dims.AXES` のどれか）
     color_by: str = "acceptance"
     wobble_by: str = "conflict"
     glow_by: str = "valence"
@@ -70,8 +71,8 @@ class Policy:
                for k, (lo, hi) in RANGES.items() if not lo <= getattr(self, k) <= hi]
         if self.turn not in (-1, 0, 1):
             out.append("turn=%r は -1 / 0 / 1 のどれか" % self.turn)
-        out += ["%s=%r は次元の名前ではない（%s）" % (k, getattr(self, k), " / ".join(DIMS))
-                for k in BY if getattr(self, k) not in DIMS]
+        out += ["%s=%r は次元の名前ではない（%s）" % (k, getattr(self, k), " / ".join(AXES))
+                for k in BY if getattr(self, k) not in AXES]
         return out
 
     def to_dict(self) -> dict[str, Any]:

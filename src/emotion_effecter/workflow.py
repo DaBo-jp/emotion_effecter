@@ -14,6 +14,10 @@ song.json に `tempo` がある曲は、気持ちの速さ（Jev）も聞いて 
 （あれば作り直さない。`redo` に `pace`）。拍と気持ちから出した流れ・踊りの速さは
 **emotion にだけ効く**——Jev の判断なので、base は song.json の速さのまま。
 
+song.json に聴衆の映像（`files.audience`）がある曲は、映像と曲を音で時刻合わせして、
+セクションごとの聴衆の盛り上がり（Jev の画像入力）を audience.json に残す（あれば作り
+直さない。`redo` に `audience`）。盛り上がりは**emotion にだけ効く**。
+
 `suggest`（effect の提案）は書き出しとは別に回す。属性（Jev）は elements.json に
 残し、あれば作り直さない。
 
@@ -23,7 +27,7 @@ from __future__ import annotations
 
 import tempfile
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
 
@@ -31,7 +35,9 @@ from cymatics import effects
 from cymatics.dsp import audio
 
 from . import (
+    audience,
     casting,
+    dims,
     drive,
     elements,
     lyrics,
@@ -41,6 +47,7 @@ from . import (
     production,
     scenes,
     structure,
+    sync,
     tempo,
     timeline,
     video,
@@ -51,7 +58,7 @@ from .manifest import Manifest
 STEPS = ("score", "sections", "emotion", "base", "compare")
 
 #: `redo` に入れられるもの。気持ちの速さ（`pace`）は `tempo` のある曲だけが聞く
-REDO = STEPS + ("pace",)
+REDO = STEPS + ("pace", "audience")
 
 Say = Callable[[str], None]
 
@@ -61,6 +68,7 @@ NAMES: Mapping[str, str] = MappingProxyType({
     "mood": "mood.json", "timed": "lyrics.timed.md", "emotion": "emotion.mp4",
     "base": "base.mp4", "compare": "compare.mp4", "previews": "previews.png",
     "elements": "elements.json", "suggest": "suggest.md", "pace": "pace.json",
+    "audience": "audience.json",
 })
 
 
@@ -91,6 +99,31 @@ def paces(m: Manifest, o: Outputs, redo: Iterable[str], say: Say) -> list[pace.P
         pace.save(o["pace"], song, pace.score(song))
         say("pace: %s" % o["pace"])
     return pace.load(o["pace"])
+
+
+def timing(m: Manifest) -> sync.Sync:
+    """聴衆の映像の時刻合わせ。song.json に `audience.lead` があればそれが勝つ。"""
+    if m.lead is not None:
+        return sync.Sync(m.lead, 0.0)
+    return sync.align(m.file("audio"), m.file("audience"))
+
+
+def cheers(m: Manifest, o: Outputs, song: lyrics.Song, redo: Iterable[str],
+           say: Say) -> list[audience.Cheer] | None:
+    """聴衆の採点。聴衆の映像が無い曲は None。"""
+    clip = m.file("audience")
+    if clip is None:
+        return None
+    if _fresh(o["audience"], "audience", redo):
+        s = timing(m)
+        say("audience: 映像の %.2f 秒で曲が始まる（山の鋭さ %.1f）" % (s.lead, s.strength))
+        shots = audience.plan(song, audio.duration(m.file("audio")), s.lead,
+                              video.probe_duration(clip), m.spread)
+        with tempfile.TemporaryDirectory() as tmp:
+            scored = audience.score(shots, audience.stills(clip, shots, tmp))
+        audience.save(o["audience"], m.title, asdict(s), scored)
+        say("audience: %s" % o["audience"])
+    return audience.load(o["audience"])
 
 
 def song_elements(m: Manifest, o: Outputs, redo: bool, say: Say) -> elements.Elements:
@@ -134,8 +167,10 @@ def fps_of(m: Manifest) -> int:
 
 
 def build_timeline(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
-                   xfade: float = 2.0) -> timeline.Timeline:
-    return timeline.build(song, moods, audio.duration(m.file("audio")), fps_of(m), xfade)
+                   xfade: float = 2.0,
+                   cheered: list[audience.Cheer] | None = None) -> timeline.Timeline:
+    return timeline.build(song, moods, audio.duration(m.file("audio")), fps_of(m), xfade,
+                          cheered)
 
 
 def build_scenes(m: Manifest, song: lyrics.Song, xfade: float = 2.0,
@@ -169,8 +204,11 @@ def emotion_scenes(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.
 def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
             jobs: int = 0, sc: scenes.Scenes | None = None) -> None:
     params = {**m.params, "audio": m.file("audio"), "image": m.file("image")}
+    heard = tl is not None and m.file("audience") is not None
     sources = {"lyrics": m.file("lyrics"), "mood": o["mood"] if tl else None,
-               "manifest": str(m.root / "song.json")}
+               "manifest": str(m.root / "song.json"),
+               "audience": m.file("audience") if heard else None,
+               "cheers": o["audience"] if heard else None}
     production.produce(m.effect, params, tl, out, opening=m.file("opening"),
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
                        jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays)
@@ -197,7 +235,8 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
 
     どちらも `sections` の流れで描く ∴ 左右の違いは感情（と `tempo` の速さ）だけ。
     """
-    tl, sc = build_timeline(m, song, moods), build_scenes(m, song)
+    tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
+    sc = build_scenes(m, song)
     sc_mood = emotion_scenes(m, o, song, moods, redo, say)
     ends = [s.start for s in song.sections[1:]] + [audio.duration(m.file("audio"))]
     rows = []
@@ -208,7 +247,7 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
             t = (sec.start + end) / 2
             v = tl.frame(int(t * tl.fps))
             label = "%s  %s  %s" % (sec.name.split(" - ")[0], lyrics.fmt_time(t), "  ".join(
-                "%s %.2f" % (d[:3], v[d]) for d in mood.DIMS))
+                "%s %.2f" % (d[:3], v[d]) for d in dims.AXES if d in v))
             pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y)
                     for k, x, y in (("base", None, sc), ("mood", tl, sc_mood))]
             rows.append((label, pair))
@@ -225,7 +264,8 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
     moods, song = score(m, o, redo, say), sections(m, o, redo, say)
     sc = build_scenes(m, song)
     if "emotion" in steps:
-        produce(m, o["emotion"], build_timeline(m, song, moods), o, jobs,
+        tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
+        produce(m, o["emotion"], tl, o, jobs,
                 emotion_scenes(m, o, song, moods, redo, say))
         say("emotion: %s" % o["emotion"])
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):

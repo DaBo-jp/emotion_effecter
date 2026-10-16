@@ -118,8 +118,8 @@ def _swing_problems(effect: str, key: str, doc: Any) -> list[str]:
         return ["%s: 小数の項目だけ動かせる（%s）" % (key, fields[key].type.__name__)]
     if not isinstance(doc, Mapping) or set(notes_dropped(doc)) != set(SWING_KEYS):
         return ["%s: {\"by\": 軸, \"lo\": 数, \"hi\": 数} で書く" % key]
-    bad = [] if doc["by"] in dims.DIMS else [
-        "%s: 知らない軸 %s（%s）" % (key, doc["by"], ", ".join(dims.DIMS))]
+    bad = [] if doc["by"] in dims.AXES else [
+        "%s: 知らない軸 %s（%s）" % (key, doc["by"], ", ".join(dims.AXES))]
     for end in ("lo", "hi"):
         v = doc[end]
         if not isinstance(v, (int, float)) or isinstance(v, bool):

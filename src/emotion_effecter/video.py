@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from collections.abc import Sequence
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -38,6 +39,36 @@ def count_frames(path: str) -> int:
 def frames_of(path: str, fps: int) -> int:
     """その動画を fps に揃えたときのフレーム数（切り捨て）。10.005秒 → 300。"""
     return int(probe_duration(path) * fps)
+
+
+def audio_of(path: str, sr: int) -> np.ndarray:
+    """動画（か音源）の音を、モノラル float32 の `sr` Hz で。音が無ければ落ちる。"""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(sr),
+         "-f", "f32le", "-"], capture_output=True, check=True).stdout
+    if not raw:
+        raise ValueError("音が無い: %s" % path)
+    return np.frombuffer(raw, np.float32)
+
+
+#: Jev が読める画像の辺の長さ（px、両端を含む）。外れる画像は縮めずに断られる
+IMAGE_SIDE = (280, 1568)
+
+
+def still_at(path: str, t: float, dst: str) -> str:
+    """t 秒のフレームを JPEG に。長い辺を `IMAGE_SIDE` の上限まで縮める。
+
+    短い辺が下限に届かない映像は断る——引き伸ばしても見えるものは増えない。
+    """
+    lo, hi = IMAGE_SIDE
+    _ff("-ss", "%.3f" % t, "-i", path, "-frames:v", "1", "-vf",
+        "scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease" % (hi, hi),
+        "-q:v", "3", dst)
+    with Image.open(dst) as im:
+        if min(im.size) < lo:
+            raise ValueError("%s: 映像が小さすぎる（%dx%d、短い辺 %dpx 以上が要る）"
+                             % (path, im.size[0], im.size[1], lo))
+    return dst
 
 
 def conform(src: str, dst: str, fps: int, frames: int) -> str:

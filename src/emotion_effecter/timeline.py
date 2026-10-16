@@ -6,6 +6,8 @@
 - 最後に `xfade` 秒のハン窓でならす。∴ 境界は xfade 秒かけて移り変わる
 
 曲線の名前は Score の次元（`acceptance` など）と、Choice の確率（`emo:doubt` など）。
+聴衆の映像を採点してあれば、その軸（`hype`）も入る。**聴衆の軸は間奏にも値がある**
+（聴衆は間奏でこそ沸く）ので、歌詞の軸とは別に置いてからならす。
 フレーム番号は曲の先頭から数える（cymatics の `Frame.f` と同じ）ので、
 分割書き出しでも同じ値になる。
 
@@ -21,6 +23,7 @@ from typing import Any
 
 import numpy as np
 
+from .audience import Cheer
 from .lyrics import Song
 from .mood import DIMS, Mood
 from .pace import Pace
@@ -95,6 +98,19 @@ def anchors(song: Song, moods: Sequence[Mood],
     return [None if m is None else _values(m, p) for m, p in zip(ms, ps)]
 
 
+def cheer_marks(song: Song, cheers: Sequence[Cheer]) -> list[Anchor]:
+    """セクションごとの聴衆の軸。**全セクションに要る。** 名前で順に対応づけ、
+    対応しないものは全部並べて断る。"""
+    names = [c.section for c in cheers]
+    want = [s.name for s in song.sections]
+    if names != want:
+        bad = (["聴衆の採点が無い: %s" % n for n in want if n not in names]
+               + ["当たるセクションが無い聴衆の採点: %s" % n for n in names if n not in want])
+        bad = bad or ["並びが違う: %s" % " / ".join(names)]
+        raise ValueError("歌詞と聴衆の採点が対応しない:\n  " + "\n  ".join(bad))
+    return [dict(c.scores) for c in cheers]
+
+
 def _fill(marks: list[Anchor], frames: list[int], n: int, key: str) -> np.ndarray:
     """セクションの境界フレーム `frames`（先頭 0、末尾 n）に沿って値を置く。"""
     curve = np.zeros(n)
@@ -120,14 +136,20 @@ def _smooth(curve: np.ndarray, width: int) -> np.ndarray:
 
 
 def build(song: Song, moods: Sequence[Mood], duration: float, fps: int,
-          xfade: float = 2.0) -> Timeline:
-    """`song` は開始時刻つき（`[Verse 1 @0:13.35]`）であること。"""
+          xfade: float = 2.0, cheers: Sequence[Cheer] | None = None) -> Timeline:
+    """`song` は開始時刻つき（`[Verse 1 @0:13.35]`）であること。
+
+    `cheers`（聴衆の採点）を渡すと、その軸の曲線も入る。
+    """
     if not song.timed:
         raise ValueError("開始時刻の無いセクションがある（sections コマンドで推定する）")
     n = int(duration * fps) + 1
     frames = [min(n, int(round(s.start * fps))) for s in song.sections] + [n]
-    marks = anchors(song, moods)
-    names = tuple(sorted({k for a in marks if a for k in a}))
+    sets = [anchors(song, moods)]
+    if cheers is not None:
+        sets.append(cheer_marks(song, cheers))
     width = int(xfade * fps)
-    return Timeline(fps, names,
-                    np.array([_smooth(_fill(marks, frames, n, k), width) for k in names]))
+    rows = {k: _smooth(_fill(marks, frames, n, k), width)
+            for marks in sets for k in sorted({k for a in marks if a for k in a})}
+    names = tuple(sorted(rows))
+    return Timeline(fps, names, np.array([rows[k] for k in names]))
