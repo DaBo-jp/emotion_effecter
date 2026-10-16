@@ -10,7 +10,8 @@
               {"effect": "rune", "params": {...}},   ← effect と引数
       "policy": {"warm": "255,120,56", "turn": 0},
       "sections": {"Chorus 1": {"flow": "in"}},  ← セクションごとの流れの向き（`scenes.py`）
-      "tempo": {"bars_calm": 8}             ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
+      "tempo": {"bars_calm": 8},            ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
+      "overlays": [{"effect": "crowd", ...}]  ← 主役の上や下に重ねる層（`overlay.py`）
     }
 
 ファイル名は song.json からの相対。`opening` / `closing` / `published` は無くてもいい。
@@ -26,13 +27,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import overlay as overlay_mod
 from . import policy as policy_mod
 from . import scenes as scenes_mod
 from . import tempo as tempo_mod
 
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published")
-KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo")
+KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays")
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,8 @@ class Manifest:
     sections: Mapping[str, Any] = field(default_factory=dict)
     #: 流れる速さを拍と気持ちで変えるか。None なら変えない（`tempo` を書いていない）
     tempo: tempo_mod.Tempo | None = None
+    #: 主役の上や下に重ねる層。書いていなければ空（素の1枚）
+    overlays: tuple[overlay_mod.Overlay, ...] = ()
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -56,16 +60,6 @@ class Manifest:
 
 def _notes_dropped(doc: Mapping[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in doc.items() if not k.startswith("_")}
-
-
-def _flat(params: Mapping[str, Any]) -> dict[str, Any]:
-    """入れ子の値（`mask_curve` のカーブなど）は JSON の文字列にして渡す。
-
-    cymatics はカーブを JSON の文字列で受ける。song.json ではフロントが書き出した
-    オブジェクトをそのまま置けるように、ここで文字列へ寄せる。
-    """
-    return {k: json.dumps(v, ensure_ascii=False) if isinstance(v, (dict, list)) else v
-            for k, v in params.items()}
 
 
 def base_of(doc: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -76,7 +70,7 @@ def base_of(doc: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     if set(doc) == {"preset"}:
         return presets.get(doc["preset"])
     if "effect" in doc and set(doc) <= {"effect", "params"}:
-        return doc["effect"], _flat(doc.get("params", {}))
+        return doc["effect"], overlay_mod.flat(doc.get("params", {}))
     raise ValueError('base は {"preset": 名前} か {"effect": 名前, "params": {...}}（%s）'
                      % ", ".join(sorted(doc)))
 
@@ -117,6 +111,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
         bad += _tempo_problems(doc, effect)
     except (ValueError, KeyError) as e:
         bad.append(str(e))
+    bad += overlay_mod.problems(doc.get("overlays", []))
     try:
         policy_mod.from_mapping(_notes_dropped(doc.get("policy", {})))
     except ValueError as e:
@@ -136,4 +131,5 @@ def load(root: str | Path) -> Manifest:
     return Manifest(root, doc["title"], doc.get("genre") or None, files, effect, params,
                 _notes_dropped(doc.get("policy", {})),
                 _notes_dropped(doc.get("sections", {})),
-                tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None)
+                tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None,
+                overlay_mod.from_list(doc.get("overlays", [])))

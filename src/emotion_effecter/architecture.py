@@ -36,6 +36,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "casting": 10,        # 属性 + BPM → effect の候補。描画を知らない
     "structure": 10,      # lyrics + beats → 開始時刻
     "scenes": 10,         # lyrics → セクションごとに変える層の引数（流れの向き・速さ）
+    "overlay": 10,        # 主役の上や下に重ねる層と、感情で動かす項目
 
     # 20 — 判断を束ねる。互いに知らない
     "manifest": 20,       # song.json（曲の宣言）。policy で写像を検証する

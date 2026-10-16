@@ -17,7 +17,7 @@ import hashlib
 import json
 import os
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from importlib.metadata import version
 from typing import Any
@@ -26,6 +26,7 @@ from cymatics import effects
 from cymatics.dsp import audio
 
 from . import drive, video
+from .overlay import Overlay
 from .policy import Policy
 from .scenes import Scenes
 from .timeline import Timeline
@@ -63,7 +64,7 @@ def sha256(path: str) -> str:
 
 def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chunk],
            sources: Mapping[str, str | None], mood: bool,
-           sc: Scenes | None = None) -> dict[str, Any]:
+           sc: Scenes | None = None, ovs: Sequence[Overlay] = ()) -> dict[str, Any]:
     """再現の記録。JSON にそのまま落ちる形。"""
     return {
         "versions": {p: version(p) for p in ("emotion_effecter", "cymatics", "typesafe-sdk")},
@@ -71,6 +72,7 @@ def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chun
         "mood": mood,
         "policy": pol.to_dict(),
         "scenes": sc.to_dict() if sc is not None else None,
+        "overlays": [ov.to_dict() for ov in ovs],
         "spec": {k: v for k, v in spec.items() if k not in ("out", "preview")},
         "cut": asdict(c),
         "chunks": [{"f0": ch.f0, "frames": ch.frames} for ch in chunks],
@@ -93,20 +95,21 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
             opening: str | None = None, closing: str | None = None,
             pol: Policy = Policy(), jobs: int = 0, chunk_seconds: int = CHUNK_SECONDS,
             sources: Mapping[str, str | None] | None = None,
-            scenes: Scenes | None = None) -> dict[str, Any]:
+            scenes: Scenes | None = None,
+            overlays: Sequence[Overlay] = ()) -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。"""
     pol.check()
     spec = effects.get(effect).spec_from(**{**params, "out": out})
     c = cut(spec["audio"], int(spec["fps"]), opening, closing)
-    size = chunk_seconds * c.fps if drive.chunk_safe(effect) else c.body1 - c.body0
+    size = chunk_seconds * c.fps if drive.chunk_safe(effect, overlays) else c.body1 - c.body0
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
         chunks = drive.plan_chunks(c.body0, c.body1, size, tmp)
-        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes)
+        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays)
         silent = _assemble(parts, c, opening, closing, tmp)
         video.mux(silent, spec["audio"], out, c.total / c.fps)
     src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
            "closing": closing, **(sources or {})}
-    rec = record(spec, pol, c, chunks, src, tl is not None, scenes)
+    rec = record(spec, pol, c, chunks, src, tl is not None, scenes, overlays)
     with open(out + ".plan.json", "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=2)
     return rec

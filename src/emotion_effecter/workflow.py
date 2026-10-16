@@ -173,7 +173,7 @@ def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
                "manifest": str(m.root / "song.json")}
     production.produce(m.effect, params, tl, out, opening=m.file("opening"),
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
-                       jobs=jobs, sources=sources, scenes=sc)
+                       jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays)
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:
@@ -187,7 +187,7 @@ def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str,
           sc: scenes.Scenes | None = None) -> str:
     params = {**m.params, "audio": m.file("audio"), "image": m.file("image"),
               "out": png + ".mp4", "preview": png, "preview_at": t}
-    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc)
+    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc, m.overlays)
     return png
 
 

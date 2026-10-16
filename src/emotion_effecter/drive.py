@@ -11,13 +11,16 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
   導出値を作り直した ctx で描く。境界では古い引数と新しい引数で2回描き、
   濃さ（`fr.wa`）を分け合う
   （ただし包絡が streaming の effect は cymatics 側が区間依存。`chunk_safe()`）
+- 重ねる層（`overlay.Overlay`）があれば cymatics の重ね合わせで描く。主役の層は
+  上と同じ包み方、重ねる層は感情で動かす項目（`moods`）だけを差し替える。
+  無ければ今までと同じ1枚の道を通る ∴ 画素は変わらない
 """
 from __future__ import annotations
 
 import contextlib
 import os
 import types
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, replace
 from typing import Any
@@ -26,6 +29,7 @@ import numpy as np
 from cymatics import effects
 from cymatics.render import pipeline
 
+from .overlay import Overlay
 from .policy import Look, Policy, look
 from .scenes import Scenes
 from .timeline import Timeline
@@ -78,23 +82,75 @@ def wrap(eff: effects.Effect, tl: Timeline | None, pol: Policy,
     return replace(eff, module=mod)
 
 
-def chunk_safe(effect: str) -> bool:
-    """区間に分けて書き出しても通しと同じ絵になる effect か。"""
-    return effects.get(effect).module.ENVELOPE == "precomputed"
+def wrap_overlay(eff: effects.Effect, ov: Overlay, tl: Timeline | None) -> effects.Effect:
+    """重ねる層の `draw()` を包む。そのフレームの感情で `moods` の項目を差し替える。"""
+    if tl is None or not ov.swings:
+        return eff
+    mod = types.ModuleType("mood_" + eff.name)
+    mod.__dict__.update({k: v for k, v in vars(eff.module).items()
+                         if not k.startswith("__")})
+    inner = eff.module
+
+    def draw(img, ctx, fr):
+        return inner.draw(img, variant(inner, ctx, ov.at(tl.frame(fr.f))), fr)
+
+    mod.draw = draw
+    return replace(eff, module=mod)
+
+
+def chunk_safe(effect: str, ovs: Sequence[Overlay] = ()) -> bool:
+    """区間に分けて書き出しても通しと同じ絵になるか。**重ねる層も全部見る。**"""
+    return all(effects.get(e).module.ENVELOPE == "precomputed"
+               for e in (effect, *(ov.effect for ov in ovs)))
+
+
+def _overlay_layer(key: str, ov: Overlay, main: Mapping[str, Any]):
+    """重ねる層1枚の Layer。**フェードは主役から引き継ぐ**（書けば層の値が勝つ）。"""
+    from cymatics.model import scope
+    from cymatics.model.compose import Layer
+
+    eff = effects.get(ov.effect)
+    both = {f.name for f in eff.fields if scope.scope_of(f.group) == "both"}
+    own = {f.name for f in eff.fields if scope.scope_of(f.group) != "shared"}
+    fill = {f.name: "-" for f in eff.fields if f.required}
+    s = eff.spec_from(**{**fill, **{k: main[k] for k in both if k in main},
+                         **ov.params})
+    return Layer(key, {k: v for k, v in s.items() if k in own})
+
+
+def _stacked(main: effects.Effect, s: Mapping[str, Any], ovs: Sequence[Overlay],
+             tl: Timeline | None):
+    """(Composition, 層の名前 → effect)。層は下から under・主役・over の順。"""
+    from cymatics.model.compose import Composition, from_spec
+
+    base = from_spec("base", list(main.fields), s)
+    keys = ["overlay%d" % i for i in range(len(ovs))]
+    lay = {k: _overlay_layer(k, ov, s) for k, ov in zip(keys, ovs)}
+    under = [lay[k] for k, ov in zip(keys, ovs) if ov.place == "under"]
+    over = [lay[k] for k, ov in zip(keys, ovs) if ov.place == "over"]
+    get = {"base": main, **{k: wrap_overlay(effects.get(ov.effect), ov, tl)
+                            for k, ov in zip(keys, ovs)}}
+    return Composition(base.shared, [*under, *base.layers, *over]), get
 
 
 def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
-           pol: Policy = Policy(), sc: Scenes | None = None):
-    """平らな Spec 1つで書き出す。`tl=None` かつ `sc=None` なら素の cymatics と同じ。
+           pol: Policy = Policy(), sc: Scenes | None = None,
+           ovs: Sequence[Overlay] = ()):
+    """平らな Spec 1つで書き出す。`tl=None` かつ `sc=None` で重ねる層が無ければ
+    素の cymatics と同じ。
 
-    Spec の検証は cymatics の `pipeline.render()` が、Policy の検証はここがする。
+    Spec の検証は cymatics の `pipeline` が、Policy の検証はここがする。
     """
     pol.check()
     eff = effects.get(effect)
     s = eff.spec_from(**params)
     if sc is not None and sc.is_plain:
         sc = None
-    return pipeline.render(wrap(eff, tl, pol, sc) if tl or sc else eff, s)
+    main = wrap(eff, tl, pol, sc) if tl or sc else eff
+    if not ovs:
+        return pipeline.render(main, s)
+    comp, get = _stacked(main, s, ovs, tl)
+    return pipeline.render_composition(comp, get.__getitem__)
 
 
 # ------------------------------------------------------------- 区間に分けて書く
@@ -117,18 +173,18 @@ def plan_chunks(f0: int, f1: int, size: int, workdir: str) -> list[Chunk]:
 
 
 def _render_chunk(job) -> str:
-    effect, params, tl, pol, sc, chunk = job
+    effect, params, tl, pol, sc, ovs, chunk = job
     fps = int(params["fps"])
     p = {**params, **chunk.window(fps), "out": chunk.path, "no_audio": True}
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
-        render(effect, p, tl, pol, sc)
+        render(effect, p, tl, pol, sc, ovs)
     return chunk.path
 
 
 def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
                   chunks: list[Chunk], pol: Policy = Policy(), jobs: int = 0,
-                  sc: Scenes | None = None) -> list[str]:
+                  sc: Scenes | None = None, ovs: Sequence[Overlay] = ()) -> list[str]:
     """区間ごとに並列で書き出す（音なし）。戻り値は区間の動画、順番どおり。
 
     precomputed の包絡は初回にキャッシュへ書かれるので、先に1枚描いて温めておく
@@ -138,8 +194,8 @@ def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
         render(effect, {**params, "preview": chunks[0].path + ".warm.png",
-                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc)
+                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc, ovs)
     os.remove(chunks[0].path + ".warm.png")
-    work = [(effect, params, tl, pol, sc, c) for c in chunks]
+    work = [(effect, params, tl, pol, sc, ovs, c) for c in chunks]
     with ProcessPoolExecutor(max_workers=jobs or min(len(chunks), os.cpu_count() or 1)) as ex:
         return list(ex.map(_render_chunk, work))

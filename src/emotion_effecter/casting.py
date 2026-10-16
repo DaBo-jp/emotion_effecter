@@ -93,6 +93,7 @@ CASTS: Mapping[str, Cast] = MappingProxyType({
 #: 候補にしない effect と理由。**黙って外さない**（テストが全 effect を数える）
 EXCLUDED: Mapping[str, str] = MappingProxyType({
     "ring": "公開済み動画の再現のために残してある旧版。新しい曲は arc の halo で足りる",
+    "crowd": "主役ではなく重ねる層（`overlays`）。属性ではなく「ライブ会場にするか」で選ぶ",
 })
 
 
