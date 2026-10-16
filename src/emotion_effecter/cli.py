@@ -1,6 +1,7 @@
 """コマンドの入口。
 
     song      1曲を最初から最後まで（入力 music_data/<曲>/ → 出力 out/<曲>/）
+    live      ライブ動画1本に、盛り上がり（Jev）に合わせたエフェクトを重ねる
     suggest   歌詞の属性（水地風金火明暗）と BPM → effect の候補
     score     歌詞 → セクションごとの感情（Jev）
     sections  歌詞 + 音源 → 各セクションの開始時刻を歌詞に書き込む
@@ -125,6 +126,14 @@ def cmd_song(a: argparse.Namespace) -> None:
     workflow.run(m, out, steps=a.steps, redo=a.redo, jobs=a.jobs)
 
 
+def cmd_live(a: argparse.Namespace) -> None:
+    from . import livefile, liveflow
+
+    lv = livefile.load(a.dir)
+    out = a.out or str(Path("out") / Path(a.dir).resolve().name)
+    liveflow.run(lv, out, steps=a.steps, redo=a.redo, jobs=a.jobs)
+
+
 def cmd_suggest(a: argparse.Namespace) -> None:
     from . import casting, manifest, workflow
 
@@ -153,6 +162,20 @@ def _add_song(sub) -> None:
     p.add_argument("--previews", action="store_true",
                    help="動画は作らず、セクションごとの「感情なし｜感情あり」を1枚に")
     p.set_defaults(fn=cmd_song)
+
+
+def _add_live(sub) -> None:
+    from .liveflow import REDO, STEPS
+
+    p = sub.add_parser("live", help="ライブ動画1本に、盛り上がりに合わせたエフェクトを重ねる"
+                                     "（live.json のあるディレクトリ）")
+    p.add_argument("dir", help="入力ディレクトリ（live.json がある）")
+    p.add_argument("--out", help="出力ディレクトリ。既定は out/<入力ディレクトリ名>")
+    p.add_argument("--steps", nargs="+", choices=STEPS, default=list(STEPS))
+    p.add_argument("--redo", nargs="+", choices=REDO, default=[],
+                   help="出力があってもやり直す工程（score は盛り上がりの採点）")
+    p.add_argument("--jobs", type=int, default=0)
+    p.set_defaults(fn=cmd_live)
 
 
 def _add_suggest(sub) -> None:
@@ -224,8 +247,8 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="emotion-effecter", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for add in (_add_song, _add_suggest, _add_score, _add_sections, _add_render, _add_produce,
-                _add_compare):
+    for add in (_add_song, _add_live, _add_suggest, _add_score, _add_sections, _add_render,
+                _add_produce, _add_compare):
         add(sub)
     return ap
 

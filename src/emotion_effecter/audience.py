@@ -50,6 +50,22 @@ QUESTIONS: Mapping[str, Score] = MappingProxyType({
 })
 
 
+#: ライブ映像そのもの（ステージも客席も映る）を採点するときの問い。軸は同じ `hype`
+SCENE: Mapping[str, Score] = MappingProxyType({
+    "hype": Score(
+        instructions=["`frames` はライブ映像の同じ数秒から取った写真。",
+                      "このライブの場面はどれだけ盛り上がっているか。演者の動き・"
+                      "客席の様子・照明や演出の激しさを合わせて判断する。"],
+        criteria=[
+            "静か。MC や静かな曲の入りで、演者も客席もほとんど動いていない",
+            "穏やか。演者は歌い始めているが、客席は聴き入っている",
+            "乗っている。演者が動き、客席の手や体が拍に乗っている",
+            "盛り上がっている。演者が煽り、照明が激しく、多くの手が挙がっている",
+            "最高潮。演者も客席も全力で、照明や演出が一斉に弾けている",
+        ]),
+})
+
+
 @dataclass(frozen=True)
 class Shot:
     """1セクションで映像から取る時刻。"""
@@ -114,18 +130,21 @@ def from_response(shot: Shot, resp) -> Cheer:
 
 
 async def score_shots(shots: Sequence[Shot], paths: Sequence[Sequence[str]],
-                      client: AsyncTypeSafeClient) -> list[Cheer]:
+                      client: AsyncTypeSafeClient,
+                      questions: Mapping[str, Score] = QUESTIONS) -> list[Cheer]:
     resps = await asyncio.gather(*(
         client.system_one(state={"frames": [Image(Path(p)) for p in ps]},
-                          questions=QUESTIONS, extra_headers=HEADERS)
+                          questions=questions, extra_headers=HEADERS)
         for ps in paths))
     return [from_response(s, r) for s, r in zip(shots, resps)]
 
 
-def score(shots: Sequence[Shot], paths: Sequence[Sequence[str]]) -> list[Cheer]:
+def score(shots: Sequence[Shot], paths: Sequence[Sequence[str]],
+          questions: Mapping[str, Score] = QUESTIONS) -> list[Cheer]:
+    """`questions` は聴衆を見る `QUESTIONS` か、ライブ映像そのものを見る `SCENE`。"""
     async def run() -> list[Cheer]:
         async with AsyncTypeSafeClient() as client:
-            return await score_shots(shots, paths, client)
+            return await score_shots(shots, paths, client, questions)
     return asyncio.run(run())
 
 

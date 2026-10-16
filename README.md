@@ -163,6 +163,44 @@ uv run --env-file .env emotion-effecter suggest music_data/*               # eff
 工程ごとのコマンド（`score` / `sections` / `render` / `produce` / `compare`）も
 そのまま使える。`emotion-effecter --help` を参照。
 
+### ライブ動画1本から
+
+歌詞も音源も絵も無く、**ライブ動画1本**だけでも回せる。動画そのものを背景にして
+（cymatics の動画背景）、場面の盛り上がり（`hype`）に合わせてエフェクトを重ねる。
+
+```
+music_data/<ライブ>/live.json   入力
+out/<ライブ>/
+  audio.wav                     動画の音（書き出しの音と拍の推定に使う）
+  hype.json                     区切りごとの盛り上がり（Jev の画像入力）
+  live.mp4 (+.plan.json)        エフェクトを重ねた1本
+  compare.mp4                   上：元の動画 / 下：live.mp4
+```
+
+```json
+{
+  "title": "Ignite @ Zepp",
+  "files": {"video": "Live.mp4"},
+  "base": {"effect": "motif", "params": {"shape": "heart,star,note", "flow": "out"}},
+  "overlays": [{"effect": "crowd",
+                "moods": {"bounce": {"by": "hype", "lo": 0.02, "hi": 0.09}}}],
+  "policy": {"glow_lo": 0.6, "glow_hi": 1.6},
+  "window": {"bars": 8, "bpm": 0, "spread": 2}
+}
+```
+
+- 歌詞が無いので、**拍から決めた `window.bars` 小節ごと**に区切って採点する。
+  区切りごとに中ほどと前後 `spread` 秒の3枚を取り、演者・客席・照明を合わせた
+  場面の盛り上がりを聞く。`bpm` が 0 なら音から推定（倍や半分にずれたら手で書く）
+- 見た目を動かす軸は `hype` だけ。`policy` の `*_by` は既定で全部 `hype` で、ほかの
+  軸を書いたら断る
+- 採点（有料）は**出力があれば作り直さない**（`--redo score`）。拍や小節数を変えたら
+  区切りが変わるので `--redo score`——古い hype.json は区切りが合わないので断る
+
+```
+uv run --env-file .env emotion-effecter live music_data/<ライブ>
+```
+
 ### 歌詞ファイル
 
 作詞メモそのまま。ヘッダーのコメントの1行目がタイトル。

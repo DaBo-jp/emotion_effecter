@@ -38,11 +38,15 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "scenes": 10,         # lyrics → セクションごとに変える層の引数（流れの向き・速さ）
     "overlay": 10,        # 主役の上や下に重ねる層と、感情で動かす項目
     "sync": 10,           # 聴衆の映像と曲の音源の時刻合わせ
+    "windows": 10,        # 歌詞の無いライブ動画を小節で区切る
     "audience": 10,       # 聴衆の映像 → Jev（区間ごとの盛り上がり）。時刻合わせは知らない
 
     # 20 — 判断を束ねる。互いに知らない
     "manifest": 20,       # song.json（曲の宣言）。policy で写像を検証する
     "timeline": 20,       # 採点を時間に敷く
+
+    # 25 — 曲の宣言を使う宣言
+    "livefile": 25,       # live.json（ライブ動画1本）。base の読み方は manifest と同じ
 
     # 30 — cymatics とつなぐ
     "drive": 30,
@@ -52,6 +56,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
 
     # 50 — 1曲を最初から最後まで
     "workflow": 50,
+    "liveflow": 50,       # ライブ動画1本を最初から最後まで。workflow とは互いに知らない
 
     # 60 — 入口。互いに知らない
     "cli": 60,

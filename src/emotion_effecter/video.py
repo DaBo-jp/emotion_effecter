@@ -51,6 +51,12 @@ def audio_of(path: str, sr: int) -> np.ndarray:
     return np.frombuffer(raw, np.float32)
 
 
+def extract_audio(src: str, dst: str) -> str:
+    """動画の音を WAV に（44.1kHz）。書き出しの音はこれを乗せる。"""
+    _ff("-i", src, "-vn", "-ar", "44100", "-c:a", "pcm_s16le", dst)
+    return dst
+
+
 #: Jev が読める画像の辺の長さ（px、両端を含む）。外れる画像は縮めずに断られる
 IMAGE_SIDE = (280, 1568)
 
@@ -107,18 +113,23 @@ def label(text: str, dst: str, size: int = 22) -> str:
 
 
 def stack(top: str, bottom: str, dst: str, labels: tuple[str, str] | None = None,
-          audio_from: int = 0) -> str:
-    """上下に並べた1本。音は `audio_from`（0=上 / 1=下）から。尺は短い方に合わせる。"""
+          audio_from: int = 0, fit: int | None = None) -> str:
+    """上下に並べた1本。音は `audio_from`（0=上 / 1=下）から。尺は短い方に合わせる。
+
+    `fit` を渡すと両方をその幅に揃えてから並べる（元の映像と書き出しで大きさが違うとき）。
+    """
     seconds = min(probe_duration(top), probe_duration(bottom))
+    pre = "" if fit is None else "[0:v]scale=%d:-2[t];[1:v]scale=%d:-2[u];" % (fit, fit)
+    a, b = ("[0:v]", "[1:v]") if fit is None else ("[t]", "[u]")
     with tempfile.TemporaryDirectory() as tmp:
         if labels:
             tags = [label(t, os.path.join(tmp, "l%d.png" % i)) for i, t in enumerate(labels)]
             inputs = ["-i", top, "-i", bottom, "-i", tags[0], "-i", tags[1]]
-            graph = ("[0:v][2:v]overlay=14:14[a];[1:v][3:v]overlay=14:14[b];"
-                     "[a][b]vstack=inputs=2[v]")
+            graph = pre + ("%s[2:v]overlay=14:14[a];%s[3:v]overlay=14:14[b];"
+                           "[a][b]vstack=inputs=2[v]" % (a, b))
         else:
             inputs = ["-i", top, "-i", bottom]
-            graph = "[0:v][1:v]vstack=inputs=2[v]"
+            graph = pre + "%s%svstack=inputs=2[v]" % (a, b)
         _ff(*inputs, "-filter_complex", graph, "-map", "[v]", "-map", "%d:a" % audio_from,
             "-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p",
             "-c:a", "copy", "-t", "%.3f" % seconds, dst)
