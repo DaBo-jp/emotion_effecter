@@ -27,12 +27,14 @@
 
 | 値 | 流れる場所 |
 |---|---|
-| `right` / `left` / `center` | その列に固定。裏の帯は列の上から下まで |
+| `right` / `left` / `center` | その列に固定 |
 | `left_right` / `right_left` | セクションごとに左右を入れ替える（最初が左 / 右） |
 
-交互のときの裏の帯は、文字の塊の裏だけに敷いて文字と一緒に流れる。
+裏の帯は**列の上から下までの縦の帯**。固定の位置では常に、交互では歌詞が見えている
+側だけに敷く——文字が入ってくるにつれて濃くなり、出ていくにつれて薄くなる
+（見えている文字が `band_fade` 行ぶんで濃さいっぱい）。`card` は文字の裏の箱。
 
-裏の帯は `band` の色を不透明度 `band_alpha` で敷く。文字は列の中で中央揃え、列に
+帯は `band` の色を不透明度 `band_alpha` で敷く。文字は列の中で中央揃え、列に
 収まらない行は折り返す（空白があれば語の切れ目で、無ければ文字で）。
 
 `Roll` はフレーム番号にも時刻にも依らない配置だけを持つ（pickle できる）。描くのは
@@ -79,6 +81,7 @@ DEFAULTS: Mapping[str, Any] = MappingProxyType({
     "position": "right",
     "direction": "up",
     "fade": 0.5,             # card の浮かぶ・消える秒数
+    "band_fade": 2.0,        # 交互の縦の帯が濃くなりきるまでの、見えている文字の行数
     "band": "0,0,0",
     "band_alpha": 0.4,
     "color": "255,255,255",
@@ -107,7 +110,7 @@ EPS = 1e-9
 RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
     "band_alpha": (0.0, 1.0), "size": (0.005, 0.2), "width": (0.05, 1.0),
     "margin": (0.0, 0.45), "anchor": (0.0, 1.0), "gap": (0.0, 20.0), "line": (1.0, 4.0),
-    "fade": (0.0, 5.0)})
+    "fade": (0.0, 5.0), "band_fade": (0.0, 20.0)})
 
 
 @dataclass(frozen=True)
@@ -302,23 +305,32 @@ def _block_image(roll: Roll, b: Block) -> Image.Image:
     return img
 
 
-def _band(roll: Roll) -> tuple[int, int, int, int]:
+def _band(roll: Roll, k: float = 1.0) -> tuple[int, int, int, int]:
+    """裏の帯の色。`k` は濃さの倍率（0..1）。"""
     rgb = parse_color(str(roll.cfg["band"]))[0]
-    return (*rgb, int(round(OPAQUE * roll.cfg["band_alpha"])))
+    return (*rgb, int(round(OPAQUE * roll.cfg["band_alpha"] * k)))
+
+
+def presence(roll: Roll, side: str, shown: list[tuple[Block, int]]) -> float:
+    """その側の帯の濃さの倍率 0..1。画面に見えている文字の高さが `band_fade` 行ぶんで
+    1 ——文字が入ってくるにつれて濃くなり、出ていくにつれて薄くなる。"""
+    h = roll.size[1]
+    seen = sum(max(0, min(top + len(b.lines) * roll.step, h) - max(top, 0))
+               for b, top in shown if b.side == side)
+    full = roll.cfg["band_fade"] * roll.step
+    return 1.0 if full <= 0 and seen > 0 else min(1.0, seen / max(full, EPS))
 
 
 def _bands(roll: Roll, layer: Image.Image, shown: list[tuple[Block, int]]) -> None:
-    """裏の帯。固定の位置は列の上から下まで、交互は文字の塊の裏だけ。"""
-    d, fill = ImageDraw.Draw(layer), _band(roll)
-    pad = int(roll.px * PAD)
-    if roll.cfg["position"] in ("right", "left", "center"):
-        x0, x1 = column(roll, roll.blocks[0].side)
-        d.rectangle((x0 - pad, 0, x1 + pad, roll.size[1]), fill=fill)
-        return
-    for b, top in shown:
-        x0, x1 = column(roll, b.side)
-        d.rectangle((x0 - pad, top - pad, x1 + pad, top + len(b.lines) * roll.step + pad),
-                    fill=fill)
+    """裏の帯。**列の上から下までの縦の帯。** 固定の位置は常に、交互は歌詞が見えて
+    いる側だけ（`presence()` で出入りする）。"""
+    d, pad = ImageDraw.Draw(layer), int(roll.px * PAD)
+    fixed = roll.cfg["position"] in ("right", "left", "center")
+    for side in ({roll.blocks[0].side} if fixed else ("left", "right")):
+        k = 1.0 if fixed else presence(roll, side, shown)
+        if k > 0:
+            x0, x1 = column(roll, side)
+            d.rectangle((x0 - pad, 0, x1 + pad, roll.size[1]), fill=_band(roll, k))
 
 
 def _top(roll: Roll, b: Block, t: float) -> int:

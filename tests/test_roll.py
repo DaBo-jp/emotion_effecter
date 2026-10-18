@@ -83,8 +83,9 @@ def test_missing_font_is_refused_instead_of_a_silent_fallback():
 
 def test_every_problem_is_listed():
     bad = roll.problems({"font": "DejaVu Sans", "position": "top", "direction": "sideways",
-                         "band_alpha": 2, "color": "nope", "speed": 1, "mode": "fly"})
-    assert len(bad) == 6
+                         "band_alpha": 2, "color": "nope", "speed": 1, "mode": "fly",
+                         "band_fade": -1})
+    assert len(bad) == 7
 
 
 def test_card_shows_the_current_section_still_and_fades():
@@ -105,3 +106,23 @@ def test_roll_survives_pickle_for_parallel_rendering():
     """並列の書き出しは Roll を別プロセスへ渡す ∴ pickle できて、戻しても同じ。"""
     r = _roll(position="left_right")
     assert pickle.loads(pickle.dumps(r)) == r
+
+
+def test_alternating_band_is_a_full_height_strip_only_on_the_side_with_lyrics():
+    """交互の帯は縦に上から下まで、歌詞が見えている側だけ。もう片側は触らない。"""
+    r = _roll(position="left_right", band="0,0,255", band_alpha=0.4, band_fade=0.5)
+    # 1 秒: 左（Verse 1）が下から入ってきていて、右（Chorus 1）はまだ画面の外
+    out = np.asarray(roll.draw(Image.new("RGB", SIZE, (200, 0, 0)), 1.0, r, {})).astype(int)
+    lx = sum(roll.column(r, "left")) // 2
+    rx = sum(roll.column(r, "right")) // 2
+    assert (out[[0, SIZE[1] - 1], lx] == (120, 0, 102)).all()      # 左は上の端から下の端まで帯
+    assert (out[:, rx] == (200, 0, 0)).all()                       # 右は歌詞が無いので触らない
+
+
+def test_band_fades_in_as_the_lyrics_enter():
+    r = _roll(position="left_right", band_fade=2.0)
+    b = r.blocks[1]
+    early = [(b, SIZE[1] - int(r.step))]                            # 1行だけ見えている
+    late = [(b, 0)]
+    assert 0 < roll.presence(r, "left", early) < roll.presence(r, "left", late) == 1.0
+    assert roll.presence(r, "right", late) == 0.0
