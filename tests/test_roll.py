@@ -1,4 +1,6 @@
 """歌詞をエンドロールのように流す（`roll`）。フォントはどの Linux にもある DejaVu で試す。"""
+import pickle
+
 import numpy as np
 import pytest
 from PIL import Image
@@ -97,3 +99,9 @@ def test_card_shows_the_current_section_still_and_fades():
     lit = lambda a: np.abs(a - (200, 0, 0)).sum()            # noqa: E731
     assert 0 < lit(shots[2.5]) < lit(shots[4.0])             # 浮かんでいる途中
     assert 0 < lit(shots[5.5]) < lit(shots[4.0])             # 消えている途中
+
+
+def test_roll_survives_pickle_for_parallel_rendering():
+    """並列の書き出しは Roll を別プロセスへ渡す ∴ pickle できて、戻しても同じ。"""
+    r = _roll(position="left_right")
+    assert pickle.loads(pickle.dumps(r)) == r

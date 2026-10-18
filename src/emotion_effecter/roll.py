@@ -130,9 +130,15 @@ class Roll:
     size: tuple[int, int]
     px: int                  # 文字の高さ
     step: float              # 行の送り
-    cfg: Mapping[str, Any]
+    #: `credits` の中身（既定値で埋めたもの）。並列の書き出しで別プロセスへ渡すので
+    #: pickle できる形（項目の組の tuple）で持つ——MappingProxyType は pickle できない
+    options: tuple[tuple[str, Any], ...]
     #: 使うフォントのファイルと、その中の番号（.ttc）
     font: tuple[str, int]
+
+    @property
+    def cfg(self) -> Mapping[str, Any]:
+        return MappingProxyType(dict(self.options))
 
     def offset(self, t: float) -> float:
         """時刻 t に、帯の中のどの高さが画面の基準の高さにあるか。節目の間は直線、
@@ -272,7 +278,7 @@ def layout(song: Song, duration: float, size: tuple[int, int], cfg: Mapping[str,
         blocks.append(Block(tuple(ls), y, hgt, side))
         y += hgt
     keys = [(s.start, b.y) for s, b in zip(song.sections, blocks)] + [(duration, y)]
-    return Roll(tuple(blocks), tuple(keys), size, px, step, MappingProxyType(cfg), where)
+    return Roll(tuple(blocks), tuple(keys), size, px, step, tuple(sorted(cfg.items())), where)
 
 
 def column(roll: Roll, side: str) -> tuple[int, int]:

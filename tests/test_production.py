@@ -108,3 +108,17 @@ def test_every_transition_is_known_to_ffmpeg(tmp_path, name):
 def test_unknown_transition_is_refused(tmp_path):
     with pytest.raises(ValueError, match="知らない切り替え"):
         video.crossfade(["a", "b"], [5, 5], 2, 10, str(tmp_path / "x.mp4"), "spin")
+
+
+def test_credits_go_through_parallel_rendering(tmp_path, media):
+    """流れる歌詞を、区間に分けた並列の書き出しに通す（別プロセスへ渡せること）。"""
+    from emotion_effecter import roll
+    wav, img, (opening, closing) = media
+    song = lyrics.parse("[Verse 1 @0:00]\na\nb\n[Chorus 1 @0:03]\nc")
+    rl = roll.layout(song, 6.0, (128, 72), {"font": "DejaVu Sans"})
+    out = str(tmp_path / "out.mp4")
+    params = dict(audio=wav, image=img, width=128, height=72, fps=FPS, bands=8,
+                  cache_dir=str(tmp_path))
+    rec = production.produce("stave", params, None, out, opening=opening, closing=closing,
+                             jobs=2, chunk_seconds=2, roll=rl)
+    assert rec["credits"]["font"] == "DejaVu Sans" and video.count_frames(out) == 60
