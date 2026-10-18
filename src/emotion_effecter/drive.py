@@ -16,6 +16,7 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
   無ければ今までと同じ1枚の道を通る ∴ 画素は変わらない
 - 画面の色調（灰色・セピア）は層ではなく、重ね終えた画面に掛ける（cymatics の
   `finish`）。動かさない Policy なら `finish` を渡さない ∴ 画素は変わらない
+- 流れる歌詞（`roll.Roll`）も `finish` で、色調の**後に**描く（文字は染めない）
 """
 from __future__ import annotations
 
@@ -34,6 +35,7 @@ from cymatics.render import pipeline
 from PIL import Image
 
 from . import grade
+from . import roll as roll_mod
 from .overlay import Overlay
 from .policy import Look, Policy, look, tone, toned
 from .scenes import Scenes
@@ -153,13 +155,17 @@ def wrap_overlay(eff: effects.Effect, ov: Overlay, tl: Timeline | None) -> effec
     return replace(eff, module=mod)
 
 
-def finisher(tl: Timeline | None, pol: Policy):
-    """重ね終えた画面の仕上げ（cymatics の `finish`）。色調を動かさないなら None。"""
-    if tl is None or not toned(pol):
+def finisher(tl: Timeline | None, pol: Policy, rl: roll_mod.Roll | None = None, fps: int = 30):
+    """重ね終えた画面の仕上げ（cymatics の `finish`）。色調 → 流れる歌詞の順。
+    どちらも無ければ None。"""
+    tint = tl is not None and toned(pol)
+    if not tint and rl is None:
         return None
+    blocks: dict = {}            # 文字の塊の絵の作り置き。この書き出しの中だけで使う
 
     def finish(img, f):
-        return grade.apply(img, *tone(tl.frame(f), pol))
+        img = grade.apply(img, *tone(tl.frame(f), pol)) if tint else img
+        return img if rl is None else roll_mod.draw(img, f / fps, rl, blocks)
 
     return finish
 
@@ -201,7 +207,7 @@ def _stacked(main: effects.Effect, s: Mapping[str, Any], ovs: Sequence[Overlay],
 
 def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
            pol: Policy = Policy(), sc: Scenes | None = None,
-           ovs: Sequence[Overlay] = ()):
+           ovs: Sequence[Overlay] = (), rl: roll_mod.Roll | None = None):
     """平らな Spec 1つで書き出す。`tl=None` かつ `sc=None` で重ねる層が無ければ
     素の cymatics と同じ。
 
@@ -213,7 +219,7 @@ def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     if sc is not None and sc.is_plain:
         sc = None
     main = wrap(eff, tl, pol, sc) if tl or sc else eff
-    finish = finisher(tl, pol)
+    finish = finisher(tl, pol, rl, int(s["fps"]))
     if not ovs:
         return pipeline.render(main, s, finish)
     comp, get = _stacked(main, s, ovs, tl)
@@ -240,18 +246,19 @@ def plan_chunks(f0: int, f1: int, size: int, workdir: str) -> list[Chunk]:
 
 
 def _render_chunk(job) -> str:
-    effect, params, tl, pol, sc, ovs, chunk = job
+    effect, params, tl, pol, sc, ovs, rl, chunk = job
     fps = int(params["fps"])
     p = {**params, **chunk.window(fps), "out": chunk.path, "no_audio": True}
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
-        render(effect, p, tl, pol, sc, ovs)
+        render(effect, p, tl, pol, sc, ovs, rl)
     return chunk.path
 
 
 def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
                   chunks: list[Chunk], pol: Policy = Policy(), jobs: int = 0,
-                  sc: Scenes | None = None, ovs: Sequence[Overlay] = ()) -> list[str]:
+                  sc: Scenes | None = None, ovs: Sequence[Overlay] = (),
+                  rl: roll_mod.Roll | None = None) -> list[str]:
     """区間ごとに並列で書き出す（音なし）。戻り値は区間の動画、順番どおり。
 
     precomputed の包絡は初回にキャッシュへ書かれるので、先に1枚描いて温めておく
@@ -261,8 +268,8 @@ def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
         render(effect, {**params, "preview": chunks[0].path + ".warm.png",
-                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc, ovs)
+                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc, ovs, rl)
     os.remove(chunks[0].path + ".warm.png")
-    work = [(effect, params, tl, pol, sc, ovs, c) for c in chunks]
+    work = [(effect, params, tl, pol, sc, ovs, rl, c) for c in chunks]
     with ProcessPoolExecutor(max_workers=jobs or min(len(chunks), os.cpu_count() or 1)) as ex:
         return list(ex.map(_render_chunk, work))

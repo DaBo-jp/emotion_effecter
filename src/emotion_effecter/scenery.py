@@ -40,6 +40,9 @@ HEADERS: Mapping[str, str] = MappingProxyType({"TypeSafe-Danger-Zone-Images": "t
 #: Jev が受け取れる1辺の長さ（px）
 MIN_SIDE, MAX_SIDE = 280, 1568
 
+#: 送る JPEG の画質
+JPEG_QUALITY = 92
+
 #: 目印 → 有無（Noul）で Jev に見せる説明
 LANDMARKS: Mapping[str, str] = MappingProxyType({
     "face": "主人公（いちばん目立つ人物）の顔",
@@ -97,7 +100,7 @@ def prepare(path: str | Path) -> bytes:
         raise ValueError("%s: 画像が小さすぎる %dx%d（1辺 %d px 以上）"
                          % (path, *img.size, MIN_SIDE))
     buf = io.BytesIO()
-    img.save(buf, "JPEG", quality=92)
+    img.save(buf, "JPEG", quality=JPEG_QUALITY)
     return buf.getvalue()
 
 

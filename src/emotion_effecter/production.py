@@ -33,6 +33,7 @@ from cymatics.dsp import audio
 from . import drive, video
 from .overlay import Overlay
 from .policy import Policy
+from .roll import Roll
 from .scenes import Scenes
 from .timeline import Timeline
 
@@ -130,7 +131,7 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
             sources: Mapping[str, str | None] | None = None,
             scenes: Scenes | None = None,
             overlays: Sequence[Overlay] = (), fade: float = 0.0,
-            transition: str = "fade") -> dict[str, Any]:
+            transition: str = "fade", roll: Roll | None = None) -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
     `fade` はつなぎ目のクロスフェード（秒）、`transition` はその切り替え方。"""
     pol.check()
@@ -142,13 +143,14 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
     size = chunk_seconds * c.fps if drive.chunk_safe(effect, overlays) else f1 - f0
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
         chunks = drive.plan_chunks(f0, f1, size, tmp)
-        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays)
+        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays, roll)
         silent = _assemble(parts, c, opening, closing, tmp, transition)
         video.mux(silent, spec["audio"], out, c.total / c.fps)
     src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
            "closing": closing, **(sources or {})}
     rec = record(spec, pol, c, chunks, src, tl is not None, scenes, overlays)
     rec["transition"] = transition if c.fade else None
+    rec["credits"] = dict(roll.cfg) if roll is not None else None
     with open(out + ".plan.json", "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=2)
     return rec

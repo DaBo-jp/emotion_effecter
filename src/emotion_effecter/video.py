@@ -15,6 +15,9 @@ from PIL import Image, ImageDraw, ImageFont
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
+#: 揃え直す・混ぜるときの画質（x264 の crf）。この後 cymatics の絵とつなぐので高めに
+CRF = "16"
+
 
 def _ff(*args: str) -> None:
     subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True)
@@ -80,7 +83,7 @@ def still_at(path: str, t: float, dst: str) -> str:
 def conform(src: str, dst: str, fps: int, frames: int) -> str:
     """fps を揃えて、ちょうど frames フレームに切る。音は捨てる（後で乗せ直す）。"""
     _ff("-i", src, "-vf", "fps=%d" % fps, "-frames:v", str(frames), "-an",
-        "-c:v", "libx264", "-crf", "16", "-pix_fmt", "yuv420p", dst)
+        "-c:v", "libx264", "-crf", CRF, "-pix_fmt", "yuv420p", dst)
     return dst
 
 
@@ -130,7 +133,7 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
         cur, length = nxt, length + frames[i] - overlap
     inputs = [x for p in parts for x in ("-i", p)]
     _ff(*inputs, "-filter_complex", ";".join([pre, *chain]), "-map", cur,
-        "-frames:v", str(length), "-an", "-c:v", "libx264", "-crf", "16",
+        "-frames:v", str(length), "-an", "-c:v", "libx264", "-crf", CRF,
         "-pix_fmt", "yuv420p", dst)
     return dst
 

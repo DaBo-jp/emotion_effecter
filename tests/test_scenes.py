@@ -259,7 +259,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
     monkeypatch.setattr(workflow, "paces", lambda *a: "paces")
     monkeypatch.setattr(workflow, "tempo_extra", lambda m, song, moods, ps, say: ps)
     monkeypatch.setattr(workflow, "produce",
-                        lambda m, out, tl, o, jobs=0, sc=None, image=None:
+                        lambda m, out, tl, o, jobs=0, sc=None, image=None, rl=None:
                         got.update({out: (tl, sc)}))
 
     @dataclass(frozen=True)
@@ -267,6 +267,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
         tempo: object = None
         keys: tuple = ()
         base_plain: bool = False
+        credits: object = None
 
         def file(self, role):
             return None
@@ -285,9 +286,9 @@ def test_plain_base_is_cymatics_alone(tmp_path, monkeypatch):
     """`base_plain` の曲は base に振り付けも入れない（素の cymatics）。"""
     from emotion_effecter import workflow
     m = SimpleNamespace(base_plain=True, file=lambda role: "img.png")
-    assert workflow.base_look(m, "sc", "backdrop.mp4") == (None, "img.png")
+    assert workflow.base_look(m, "sc", "backdrop.mp4", "rl") == (None, "img.png", None)
     m = SimpleNamespace(base_plain=False, file=lambda role: "img.png")
-    assert workflow.base_look(m, "sc", "backdrop.mp4") == ("sc", "backdrop.mp4")
+    assert workflow.base_look(m, "sc", "backdrop.mp4", "rl") == ("sc", "backdrop.mp4", "rl")
 
 
 def test_tempo_speeds_go_to_emotion_only(tmp_path, monkeypatch):

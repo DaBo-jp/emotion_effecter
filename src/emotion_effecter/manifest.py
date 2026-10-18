@@ -15,6 +15,8 @@
                                               切り替わり、effect もその画像に合わせて置く
       "clip_xfade": 0.3,                    ← Opening / Closing と本編のつなぎ目の
                                               クロスフェード（秒）。書かなければ切り替え
+      "credits": {"position": "right", "band": "20,20,30"},
+                                            ← 歌詞をエンドロールのように流す（`roll.py`）
       "clip_transition": "fadewhite",       ← その切り替え方（`video.TRANSITIONS`）。
                                               書かなければ重ねて入れ替える fade
       "base_plain": true                    ← base.mp4 を素の cymatics にする（sections も
@@ -44,13 +46,14 @@ from typing import Any
 from . import dims, video
 from . import overlay as overlay_mod
 from . import policy as policy_mod
+from . import roll as roll_mod
 from . import scenes as scenes_mod
 from . import tempo as tempo_mod
 
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
-        "audience", "keys", "base_plain", "clip_xfade", "clip_transition")
+        "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
 AUDIENCE_KEYS = ("lead", "spread")
 
@@ -83,6 +86,8 @@ class Manifest:
     clip_xfade: float = 0.0
     #: その切り替え方（`video.TRANSITIONS`）
     clip_transition: str = "fade"
+    #: 歌詞を流すなら `credits` の中身（`roll.layout` に渡す）。None なら流さない
+    credits: Mapping[str, Any] | None = None
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -185,6 +190,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     xf = doc.get("clip_xfade", 0.0)
     bad += [] if isinstance(xf, (int, float)) and not isinstance(xf, bool) and xf >= 0 else [
         "clip_xfade は 0 以上の秒数"]
+    bad += roll_mod.problems(doc["credits"], root) if "credits" in doc else []
     bad += [] if doc.get("clip_transition", "fade") in video.TRANSITIONS else [
         "clip_transition=%r は知らない切り替え（%s など）"
         % (doc.get("clip_transition"), " / ".join(video.TRANSITIONS[:4]))]
@@ -226,4 +232,5 @@ def load(root: str | Path) -> Manifest:
                 overlay_mod.from_list(doc.get("overlays", [])),
                 *_audience_of(doc), _keys(root, doc.get("keys", {}))[0],
                 doc.get("base_plain", False), float(doc.get("clip_xfade", 0.0)),
-                doc.get("clip_transition", "fade"))
+                doc.get("clip_transition", "fade"),
+                _notes_dropped(doc["credits"]) if "credits" in doc else None)

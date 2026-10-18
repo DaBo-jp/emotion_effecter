@@ -39,6 +39,10 @@ MIN_RADIUS = 0.06
 #: 顔を透かす円の直径 ÷ 頭の箱の高さ
 HOLE = 1.3
 
+#: 出す座標（0..1）と半径（px）の小数の桁。記録が読みやすいように丸める
+DIGITS = 3
+RADIUS_DIGITS = 1
+
 Box = tuple[float, float, float, float]
 
 #: 置き場所 → 目印。`whole` は画面ぜんたい、`open` は人物（の脇）
@@ -73,7 +77,7 @@ def region(sc: Scenery, a: str) -> Box:
 def _radius(a: str, b: Box, w: int, h: int) -> float:
     bw, bh = (b[2] - b[0]) * w, (b[3] - b[1]) * h
     r = HALO * max(bw, bh) if a == "face" else FIT * min(bw, bh)
-    return round(max(r, MIN_RADIUS * h), 1)
+    return round(max(r, MIN_RADIUS * h), RADIUS_DIGITS)
 
 
 def _hole(sc: Scenery, a: str) -> list:
@@ -82,14 +86,14 @@ def _hole(sc: Scenery, a: str) -> list:
         return []
     b = sc.boxes["face"]
     x, y = _center(b)
-    return [[[round(x, 3), round(y, 3)], round(HOLE * (b[3] - b[1]), 3)]]
+    return [[[round(x, DIGITS), round(y, DIGITS)], round(HOLE * (b[3] - b[1]), DIGITS)]]
 
 
 def params(sc: Scenery, fields: Collection[str], w: int, h: int) -> dict[str, Any]:
     """effect の引数の名前 `fields` と画面の大きさ（px）→ 置き場所の引数。"""
     a = anchor(sc)
     b = region(sc, a)
-    x, y = (round(v, 3) for v in _center(b))
+    x, y = (round(v, DIGITS) for v in _center(b))
     out: dict[str, Any] = {}
     if "cx" in fields:
         out["cx"] = x

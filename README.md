@@ -31,7 +31,8 @@ Architecture（2026-10）: 軸は受容ではなく主導権
 
 ## 使い方
 
-Python 3.14+ と ffmpeg。`TYPESAFE_API_KEY` を `.env` に置く（.gitignore 済み）。
+Python 3.14+ と ffmpeg。歌詞を流す（`credits`）なら fontconfig と日本語フォント（Debian なら
+`fonts-noto-cjk`）。`TYPESAFE_API_KEY` を `.env` に置く（.gitignore 済み）。
 
 **入力と出力は曲ごとのディレクトリ。**
 
@@ -171,6 +172,28 @@ out/<曲>/                   出力。全部作り直せるもの
   Box は短い物の名前で聞き、歌詞などとは別のリクエストにする——長い日本語の説明や
   同じリクエストの他の質問があると、顔の箱が全身に広がった。「空いた場所」は箱に
   ならない（confidence 0.03）ので、人物の箱の左右の広い方をコードで出す
+- `credits` で**歌詞を流す**（セクションの見出しは出さず、歌詞の行だけ）。`mode` は
+  `roll`（映画のエンドロールのように流れる。各セクションの最初の行がそのセクションの
+  開始時刻に基準の高さ `anchor` を通る）か `card`（オープニングクレジットのように、
+  いま歌っているセクションを流さずに出し、`fade` 秒で浮かび・消える）
+
+  ```json
+  "credits": {"mode": "roll", "position": "left_right", "direction": "up",
+              "band": "20,20,30", "band_alpha": 0.4, "font": "noto-sans", "weight": "Regular"}
+  ```
+
+  | 項目 | 値 |
+  |---|---|
+  | `position` | `right` / `left` / `center`（固定）、`left_right` / `right_left`（セクションごとに左右を入れ替え） |
+  | `direction` | `up`（下から上）/ `down`（上から下）。`roll` だけ |
+  | `band` / `band_alpha` | 裏の帯の色と不透明度。固定の位置は列の上から下まで、交互と `card` は文字の裏だけ |
+  | `font` / `weight` | fontconfig のファミリー名か別名（`noto-sans` / `noto-serif`）かファイル。太さは Regular / Bold など |
+  | `size` / `width` / `margin` / `anchor` / `gap` / `line` / `color` | 文字の高さ・列の幅・端からの余白（比）、基準の高さ、セクションの間の行数、行の送り、文字の色 |
+
+  文字は色調（セピアなど）の後に描くので染まらない。`base_plain` の base には入れない。
+  **フォントは OS の場所を前提にしない**——頼んだファミリーと太さが fontconfig から返らな
+  ければ断る（似たものを黙って使わない）。コンテナ（Debian）には `fontconfig` と
+  `fonts-noto-cjk` を入れる
 - `"clip_xfade": 0.3` で **Opening / Closing と本編のつなぎ目をクロスフェード**にする（秒）。
   曲の尺も切れ目も変わらない——Opening の最後の 0.3 秒に本編を重ねながら入り、Closing の
   最初の 0.3 秒で本編から移る（重なるぶん本編を前後に余分に描く）。書かなければ切り替え

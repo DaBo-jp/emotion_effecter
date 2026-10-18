@@ -57,6 +57,7 @@ from . import (
     placement,
     policy,
     production,
+    roll,
     scenery,
     scenes,
     structure,
@@ -77,6 +78,9 @@ Say = Callable[[str], None]
 
 #: セクションの境界で移り変わる秒数（感情・流れ・置き場所・背景で同じ）
 XFADE = 2.0
+
+#: 背景の動画を曲の尺より長く作る秒数（cymatics は背景の動画が描く尺より短いと断る）
+BACKDROP_TAIL = 1
 
 
 #: 出力の役割 → ファイル名（`out/<曲>/` の中）
@@ -254,7 +258,7 @@ def backdrop_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
     if images is None:
         return m.file("image")
     fps, size = fps_of(m), size_of(m)
-    frames = math.ceil(audio.duration(m.file("audio")) * fps) + fps
+    frames = math.ceil(audio.duration(m.file("audio")) * fps) + BACKDROP_TAIL * fps
     starts = [int(round(s.start * fps)) for s in song.sections]
     rec = backdrop.record(images, starts, frames, fps, size, int(round(XFADE * fps)))
     log = Path(o["backdrop"] + ".json")
@@ -266,9 +270,18 @@ def backdrop_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
     return o["backdrop"]
 
 
-def base_look(m: Manifest, sc: scenes.Scenes, image: str) -> tuple[scenes.Scenes | None, str]:
-    """base に使う (Scenes, 背景)。`base_plain` なら素の cymatics（振り付けなし・元の画像）。"""
-    return (None, m.file("image")) if m.base_plain else (sc, image)
+def base_look(m: Manifest, sc: scenes.Scenes, image: str, rl: roll.Roll | None = None
+              ) -> tuple[scenes.Scenes | None, str, roll.Roll | None]:
+    """base に使う (Scenes, 背景, 流れる歌詞)。`base_plain` なら素の cymatics
+    （振り付けも歌詞も無し・元の画像）。"""
+    return (None, m.file("image"), None) if m.base_plain else (sc, image, rl)
+
+
+def credits_of(m: Manifest, song: lyrics.Song) -> roll.Roll | None:
+    """流れる歌詞の配置。song.json に `credits` が無ければ None。"""
+    if m.credits is None:
+        return None
+    return roll.layout(song, audio.duration(m.file("audio")), size_of(m), m.credits, m.root)
 
 
 def _merge(*extras: list[dict] | None) -> list[dict] | None:
@@ -316,7 +329,8 @@ def emotion_scenes(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.
 
 
 def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
-            jobs: int = 0, sc: scenes.Scenes | None = None, image: str | None = None) -> None:
+            jobs: int = 0, sc: scenes.Scenes | None = None, image: str | None = None,
+            rl: roll.Roll | None = None) -> None:
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image")}
     heard = tl is not None and m.file("audience") is not None
     sources = {"lyrics": m.file("lyrics"), "mood": o["mood"] if tl else None,
@@ -326,7 +340,7 @@ def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
     production.produce(m.effect, params, tl, out, opening=m.file("opening"),
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
                        jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays,
-                       fade=m.clip_xfade, transition=m.clip_transition)
+                       fade=m.clip_xfade, transition=m.clip_transition, roll=rl)
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:
@@ -337,10 +351,11 @@ def compare(m: Manifest, o: Outputs, say: Say) -> None:
 
 
 def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str,
-          sc: scenes.Scenes | None = None, image: str | None = None) -> str:
+          sc: scenes.Scenes | None = None, image: str | None = None,
+          rl: roll.Roll | None = None) -> str:
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image"),
               "out": png + ".mp4", "preview": png, "preview_at": t}
-    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc, m.overlays)
+    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc, m.overlays, rl)
     return png
 
 
@@ -352,7 +367,7 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
     """
     tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
     place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
-    sc = build_scenes(m, song, extra=place)
+    sc, rl = build_scenes(m, song, extra=place), credits_of(m, song)
     sc_mood = emotion_scenes(m, o, song, moods, redo, say, place)
     ends = [s.start for s in song.sections[1:]] + [audio.duration(m.file("audio"))]
     rows = []
@@ -364,9 +379,9 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
             v = tl.frame(int(t * tl.fps))
             label = "%s  %s  %s" % (sec.name.split(" - ")[0], lyrics.fmt_time(t), "  ".join(
                 "%s %.2f" % (d[:3], v[d]) for d in dims.AXES if d in v))
-            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y, im)
-                    for k, x, y, im in (("base", None, *base_look(m, sc, image)),
-                                        ("mood", tl, sc_mood, image))]
+            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y, im, r)
+                    for k, x, y, im, r in (("base", None, *base_look(m, sc, image, rl)),
+                                           ("mood", tl, sc_mood, image, rl))]
             rows.append((label, pair))
         video.sheet(rows, o["previews"])
     say("previews: %s" % o["previews"])
@@ -380,14 +395,14 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
     steps, redo = set(steps), set(redo)
     moods, song = score(m, o, redo, say), sections(m, o, redo, say)
     place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
-    sc = build_scenes(m, song, extra=place)
+    sc, rl = build_scenes(m, song, extra=place), credits_of(m, song)
     if "emotion" in steps:
         tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
         produce(m, o["emotion"], tl, o, jobs,
-                emotion_scenes(m, o, song, moods, redo, say, place), image)
+                emotion_scenes(m, o, song, moods, redo, say, place), image, rl)
         say("emotion: %s" % o["emotion"])
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
-        produce(m, o["base"], None, o, jobs, *base_look(m, sc, image))
+        produce(m, o["base"], None, o, jobs, *base_look(m, sc, image, rl))
         say("base: %s" % o["base"])
     if "compare" in steps:
         compare(m, o, say)
