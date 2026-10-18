@@ -95,20 +95,38 @@ def concat(parts: Sequence[str], dst: str) -> str:
     return dst
 
 
+#: つなぎ目の切り替え方（ffmpeg の xfade の transition）。`fade` が重ねて入れ替える
+#: オーバーラップ。`custom`（数式で書く）は除く
+TRANSITIONS: tuple[str, ...] = (
+    "fade", "wipeleft", "wiperight", "wipeup", "wipedown", "slideleft", "slideright",
+    "slideup", "slidedown", "circlecrop", "rectcrop", "distance", "fadeblack", "fadewhite",
+    "radial", "smoothleft", "smoothright", "smoothup", "smoothdown", "circleopen",
+    "circleclose", "vertopen", "vertclose", "horzopen", "horzclose", "dissolve",
+    "pixelize", "diagtl", "diagtr", "diagbl", "diagbr", "hlslice", "hrslice", "vuslice",
+    "vdslice", "hblur", "fadegrays", "wipetl", "wipetr", "wipebl", "wipebr", "squeezeh",
+    "squeezev", "zoomin", "fadefast", "fadeslow", "hlwind", "hrwind", "vuwind", "vdwind",
+    "coverleft", "coverright", "coverup", "coverdown", "revealleft", "revealright",
+    "revealup", "revealdown",
+)
+
+
 def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: int,
-              dst: str) -> str:
-    """動画をつなぐ。つなぎ目ごとに `overlap` フレーム重ねて混ぜる（音なし）。
+              dst: str, transition: str = "fade") -> str:
+    """動画をつなぐ。つなぎ目ごとに `overlap` フレーム重ねて `transition` で切り替える
+    （音なし）。
 
     `frames` は各動画のフレーム数。重ねたぶん短くなる——呼ぶ側が重なりのぶん
     長く用意する。オフセットはフレームで数えるので1フレームもずれない。
     """
+    if transition not in TRANSITIONS:
+        raise ValueError("知らない切り替え: %s" % transition)
     pre = ";".join("[%d:v]settb=AVTB,setpts=PTS-STARTPTS[v%d]" % (i, i)
                    for i in range(len(parts)))
     chain, cur, length = [], "[v0]", frames[0]
     for i in range(1, len(parts)):
         nxt = "[x%d]" % i
-        chain.append("%s[v%d]xfade=transition=fade:duration=%.6f:offset=%.6f%s"
-                     % (cur, i, overlap / fps, (length - overlap) / fps, nxt))
+        chain.append("%s[v%d]xfade=transition=%s:duration=%.6f:offset=%.6f%s"
+                     % (cur, i, transition, overlap / fps, (length - overlap) / fps, nxt))
         cur, length = nxt, length + frames[i] - overlap
     inputs = [x for p in parts for x in ("-i", p)]
     _ff(*inputs, "-filter_complex", ";".join([pre, *chain]), "-map", cur,

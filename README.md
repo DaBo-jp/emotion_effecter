@@ -174,6 +174,9 @@ out/<曲>/                   出力。全部作り直せるもの
 - `"clip_xfade": 0.3` で **Opening / Closing と本編のつなぎ目をクロスフェード**にする（秒）。
   曲の尺も切れ目も変わらない——Opening の最後の 0.3 秒に本編を重ねながら入り、Closing の
   最初の 0.3 秒で本編から移る（重なるぶん本編を前後に余分に描く）。書かなければ切り替え
+  切り替え方は `clip_transition` で ffmpeg の xfade の 58 種類から選べる（既定 `fade` が
+  重ねて入れ替えるオーバーラップ。`fadeblack` / `fadewhite` / `dissolve` / `wipeleft` /
+  `circleopen` など。一覧は `video.TRANSITIONS`）
 - `"base_plain": true` で **base.mp4 を素の cymatics** にする（`base` の引数と
   `files.image` だけ。`sections`・キー画像・置き場所も入れない）。書かなければ base にも
   振り付けが入り、compare の上下の違いは感情だけになる

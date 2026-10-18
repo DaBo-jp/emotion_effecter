@@ -10,6 +10,7 @@
 `fade`（秒）を渡すと、つなぎ目をクロスフェードにする。**曲の尺も切れ目も変えない**——
 Opening の最後の `fade` 秒に本編を重ねながら入り、Closing の最初の `fade` 秒で本編から
 移る。重なるぶん本編を前後に余分に描く。0（既定）なら今までどおりの切り替え。
+切り替え方は `transition`（`video.TRANSITIONS`。既定は重ねて入れ替える `fade`）。
 
 **出力の隣に再現の記録（`<出力>.plan.json`）を置く。** cymatics の Plan と同じ
 考え方で、実際に使った Spec・Policy・切れ目・区間と、入力ファイルのハッシュが
@@ -95,10 +96,10 @@ def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chun
 
 
 def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None,
-              tmp: str) -> str:
+              tmp: str, transition: str = "fade") -> str:
     """Opening + 本編の区間 + Closing を音なしの1本にする。"""
     if c.fade:
-        return _blended(parts, c, opening, closing, tmp)
+        return _blended(parts, c, opening, closing, tmp, transition)
     if opening:
         parts = [video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps, c.body0),
                  *parts]
@@ -109,7 +110,7 @@ def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None
 
 
 def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
-             tmp: str) -> str:
+             tmp: str, transition: str) -> str:
     """つなぎ目を `c.fade` フレーム重ねて混ぜる。本編の区間は重なりのぶん長く描いてある。"""
     f0, f1 = c.drawn()
     clips = [(video.concat(parts, os.path.join(tmp, "body.mp4")), f1 - f0)]
@@ -120,7 +121,7 @@ def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
         clips.append((video.conform(closing, os.path.join(tmp, "closing.mp4"), c.fps,
                                     c.total - c.body1), c.total - c.body1))
     return video.crossfade([p for p, _ in clips], [n for _, n in clips], c.fade, c.fps,
-                           os.path.join(tmp, "video.mp4"))
+                           os.path.join(tmp, "video.mp4"), transition)
 
 
 def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: str, *,
@@ -128,10 +129,13 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
             pol: Policy = Policy(), jobs: int = 0, chunk_seconds: int = CHUNK_SECONDS,
             sources: Mapping[str, str | None] | None = None,
             scenes: Scenes | None = None,
-            overlays: Sequence[Overlay] = (), fade: float = 0.0) -> dict[str, Any]:
+            overlays: Sequence[Overlay] = (), fade: float = 0.0,
+            transition: str = "fade") -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
-    `fade` はつなぎ目のクロスフェード（秒）。"""
+    `fade` はつなぎ目のクロスフェード（秒）、`transition` はその切り替え方。"""
     pol.check()
+    if transition not in video.TRANSITIONS:
+        raise ValueError("知らない切り替え: %s" % transition)
     spec = effects.get(effect).spec_from(**{**params, "out": out})
     c = cut(spec["audio"], int(spec["fps"]), opening, closing, fade)
     f0, f1 = c.drawn()
@@ -139,11 +143,12 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
         chunks = drive.plan_chunks(f0, f1, size, tmp)
         parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays)
-        silent = _assemble(parts, c, opening, closing, tmp)
+        silent = _assemble(parts, c, opening, closing, tmp, transition)
         video.mux(silent, spec["audio"], out, c.total / c.fps)
     src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
            "closing": closing, **(sources or {})}
     rec = record(spec, pol, c, chunks, src, tl is not None, scenes, overlays)
+    rec["transition"] = transition if c.fade else None
     with open(out + ".plan.json", "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=2)
     return rec

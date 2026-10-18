@@ -92,3 +92,19 @@ def test_crossfade_blends_at_the_seam(tmp_path):
     assert len(fr) == 16
     assert fr[3, 9, 16, 0] > 200 and fr[12, 9, 16, 2] > 200
     assert 60 < fr[8, 9, 16, 0] < 200 and 60 < fr[8, 9, 16, 2] < 200
+
+
+@pytest.mark.parametrize("name", video.TRANSITIONS)
+def test_every_transition_is_known_to_ffmpeg(tmp_path, name):
+    """宣言した切り替え方は全部、この ffmpeg で通る。ffmpeg が変われば落ちる。"""
+    clips = []
+    for c, col in (("a", "red"), ("b", "blue")):
+        clips.append(str(tmp_path / ("%s.mp4" % c)))
+        _ff("-f", "lavfi", "-i", "color=c=%s:size=32x18:rate=10:duration=0.5" % col, clips[-1])
+    dst = video.crossfade(clips, [5, 5], 2, 10, str(tmp_path / "x.mp4"), name)
+    assert video.count_frames(dst) == 8
+
+
+def test_unknown_transition_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="知らない切り替え"):
+        video.crossfade(["a", "b"], [5, 5], 2, 10, str(tmp_path / "x.mp4"), "spin")
