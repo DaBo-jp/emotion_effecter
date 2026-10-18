@@ -27,6 +27,17 @@ def test_half_gray_is_between():
     assert np.abs(half - (src + full) / 2).max() <= 1
 
 
+def test_one_matrix_matches_mixing_in_two_steps():
+    """行列1つで変換しても、灰色→セピアの2段で混ぜたのと丸めの1段以内。"""
+    rng = np.random.default_rng(0)
+    img = Image.fromarray(rng.integers(0, 256, (40, 60, 3), dtype=np.uint8))
+    a = np.asarray(img, np.float32)
+    for g, s in ((0.0, 0.56), (0.5, 0.3), (1.0, 1.0)):
+        two = a + ((a @ grade.LUMA)[..., None] - a) * g
+        two = np.clip(np.rint(two + (two @ grade.SEPIA.T - two) * s), 0, 255)
+        assert np.abs(np.asarray(grade.apply(img, g, s)).astype(int) - two).max() <= 1
+
+
 def test_sepia_is_brown():
     r, g, b = np.asarray(grade.apply(RGB, 1.0, 1.0))[0, 0].astype(int)
     assert r > g > b

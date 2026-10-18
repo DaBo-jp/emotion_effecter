@@ -73,22 +73,47 @@ def section_holes(ctx, over: Mapping[str, Any]) -> np.ndarray | None:
     return holes_mod.of(over["holes"], unit, ctx.plan.width, ctx.plan.height)
 
 
-def _holed(m, img, ctx, fr, k: np.ndarray):
-    """描く前との差を `k` 倍にして描く（cymatics の pipeline の円と同じ式）。"""
-    before = np.array(img, np.float32)
-    after = np.asarray(m.draw(img, ctx, fr) or img, np.float32)
+Cut = tuple[tuple[int, int, int, int], np.ndarray]
+
+
+def cut_of(k: np.ndarray | None) -> Cut | None:
+    """濃さ `k` の、1 未満の画素を囲む箱 (left, top, right, bottom) と、その中の `k`。
+    円の外（k=1）は「描いたまま」なので、薄めるのは箱の中だけで足りる。"""
+    if k is None:
+        return None
+    ys, xs = np.nonzero(k < 1.0)
+    if not len(xs):
+        return None
+    box = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+    return box, np.ascontiguousarray(k[box[1]:box[3], box[0]:box[2]])
+
+
+def _holed(m, img, ctx, fr, cut: Cut):
+    """描く前との差を、円の箱の中だけ `k` 倍にして描く（cymatics の pipeline の円と
+    同じ式）。箱の外は k=1 ∴ 描いたまま——画面ぜんたいで混ぜたのと画素まで同じ。"""
+    box, k = cut
+    before = np.array(img.crop(box), np.float32)
+    drawn = m.draw(img, ctx, fr) or img
+    after = np.asarray(drawn.crop(box), np.float32)
     out = before + (after - before) * k[..., None]
-    return Image.fromarray(np.clip(np.rint(out), 0, 255).astype(np.uint8))
+    drawn.paste(Image.fromarray(np.clip(np.rint(out), 0, 255).astype(np.uint8)), box[:2])
+    return drawn
 
 
-def in_scenes(m, img, ctx, fr, parts):
+def in_scenes(m, img, ctx, fr, parts, cuts: dict | None = None):
     """セクションの引数ごとに描き重ねる。濃さは `fr.wa` に掛けて分け合う。
-    セクションに透かす円があれば、その層の絵だけを円で薄める。"""
+    セクションに透かす円があれば、その層の絵だけを円で薄める。
+
+    `cuts` は円の箱の作り置き（書き出し1回ぶん、`wrap()` が持つ）。円はセクションの
+    中では変わらないので、毎フレーム作り直さない。"""
+    cuts = {} if cuts is None else cuts
     for over, k in parts:
         f = fr if k == 1.0 else replace(fr, wa=fr.wa * k)
-        holes = section_holes(ctx, over)
+        key = (over.get("holes"), over.get("holes_unit"))
+        if key not in cuts:
+            cuts[key] = cut_of(section_holes(ctx, over))
         c = variant(m, ctx, over)
-        img = m.draw(img, c, f) or img if holes is None else _holed(m, img, c, f, holes)
+        img = m.draw(img, c, f) or img if cuts[key] is None else _holed(m, img, c, f, cuts[key])
     return img
 
 
@@ -99,13 +124,14 @@ def wrap(eff: effects.Effect, tl: Timeline | None, pol: Policy,
     mod.__dict__.update({k: v for k, v in vars(eff.module).items()
                          if not k.startswith("__")})
     inner = eff.module
+    cuts: dict = {}            # 円の箱の作り置き。この書き出しの中だけで使う
 
     def draw(img, ctx, fr):
         if tl is not None:
             ctx, fr = apply(ctx, fr, look(tl.frame(fr.f), fr.t, ctx.col, pol))
         if sc is None:
             return inner.draw(img, ctx, fr)
-        return in_scenes(inner, img, ctx, fr, sc.at(fr.f))
+        return in_scenes(inner, img, ctx, fr, sc.at(fr.f), cuts)
 
     mod.draw = draw
     return replace(eff, module=mod)

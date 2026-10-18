@@ -172,8 +172,25 @@ def test_section_holes_fade_only_the_layer():
     assert k[10, 20] < 0.2 and k[0, 0] == 1.0
     assert drive.section_holes(ctx, {"holes": ""}) is None
     mod = SimpleNamespace(draw=lambda img, c, f: Image.new("RGB", img.size, (255, 255, 255)))
-    out = np.asarray(drive._holed(mod, Image.new("RGB", (40, 20)), ctx, None, k))
+    out = np.asarray(drive._holed(mod, Image.new("RGB", (40, 20)), ctx, None, drive.cut_of(k)))
     assert out[10, 20, 0] < 60 and out[0, 0, 0] == 255
+
+
+def test_mixing_only_inside_the_holes_box_equals_the_whole_screen():
+    """薄めるのを円の箱の中だけにしても、画面ぜんたいで混ぜたのと画素まで同じ。"""
+    plan = SimpleNamespace(width=64, height=36)
+    ctx = SimpleNamespace(quad=None, box=SimpleNamespace(is_full=True), plan=plan, s={})
+    k = drive.section_holes(ctx, {"holes": "[[[0.3, 0.5], 0.6], [[0.8, 0.2], 0.3]]",
+                                  "holes_unit": "fraction"})
+    rng = np.random.default_rng(1)
+    bg = rng.integers(0, 256, (36, 64, 3), dtype=np.uint8)
+    fg = rng.integers(0, 256, (36, 64, 3), dtype=np.uint8)
+    mod = SimpleNamespace(draw=lambda img, c, f: Image.fromarray(fg))
+    whole = np.clip(np.rint(bg.astype(np.float32) + (fg.astype(np.float32) - bg) * k[..., None]),
+                    0, 255).astype(np.uint8)
+    got = np.asarray(drive._holed(mod, Image.fromarray(bg), ctx, None, drive.cut_of(k)))
+    assert np.array_equal(got, whole)
+    assert drive.cut_of(None) is None and drive.cut_of(np.ones((4, 4))) is None
 
 
 def test_section_holes_refuse_a_boxed_layer():
