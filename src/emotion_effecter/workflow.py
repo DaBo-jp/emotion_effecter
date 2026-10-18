@@ -7,7 +7,8 @@
     base      base.mp4（三段、感情なし）。**公開版の動画が無い曲だけ**——
               ある曲は公開版そのものを比べる。`sections`（流れの向き）は
               感情ではなく振り付けなので base にも入れる ∴ compare の上下の
-              違いは Jev の感情だけになる
+              違いは Jev の感情だけになる。song.json に `base_plain` があれば
+              base は素の cymatics（振り付けも入れない）
     compare   compare.mp4（上：公開版 or base / 下：emotion）
 
 song.json に `tempo` がある曲は、気持ちの速さ（Jev）も聞いて pace.json に残す
@@ -265,6 +266,11 @@ def backdrop_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
     return o["backdrop"]
 
 
+def base_look(m: Manifest, sc: scenes.Scenes, image: str) -> tuple[scenes.Scenes | None, str]:
+    """base に使う (Scenes, 背景)。`base_plain` なら素の cymatics（振り付けなし・元の画像）。"""
+    return (None, m.file("image")) if m.base_plain else (sc, image)
+
+
 def _merge(*extras: list[dict] | None) -> list[dict] | None:
     """セクションごとの `extra` を重ねる（後ろが勝つ）。全部 None なら None。"""
     got = [e for e in extras if e is not None]
@@ -357,8 +363,9 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
             v = tl.frame(int(t * tl.fps))
             label = "%s  %s  %s" % (sec.name.split(" - ")[0], lyrics.fmt_time(t), "  ".join(
                 "%s %.2f" % (d[:3], v[d]) for d in dims.AXES if d in v))
-            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y, image)
-                    for k, x, y in (("base", None, sc), ("mood", tl, sc_mood))]
+            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y, im)
+                    for k, x, y, im in (("base", None, *base_look(m, sc, image)),
+                                        ("mood", tl, sc_mood, image))]
             rows.append((label, pair))
         video.sheet(rows, o["previews"])
     say("previews: %s" % o["previews"])
@@ -379,7 +386,7 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
                 emotion_scenes(m, o, song, moods, redo, say, place), image)
         say("emotion: %s" % o["emotion"])
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
-        produce(m, o["base"], None, o, jobs, sc, image)
+        produce(m, o["base"], None, o, jobs, *base_look(m, sc, image))
         say("base: %s" % o["base"])
     if "compare" in steps:
         compare(m, o, say)

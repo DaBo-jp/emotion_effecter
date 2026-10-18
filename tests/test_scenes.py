@@ -3,6 +3,7 @@ import json
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -265,6 +266,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
     class _M:
         tempo: object = None
         keys: tuple = ()
+        base_plain: bool = False
 
         def file(self, role):
             return None
@@ -277,6 +279,15 @@ def test_base_and_emotion_share_the_sections(tmp_path, monkeypatch):
     """**base にも sections を入れる。** compare の上下の違いを感情だけにするため。"""
     o, got = _run_with_fakes(tmp_path, monkeypatch, None)
     assert got == {o["emotion"]: ("tl", ("sc", None)), o["base"]: (None, ("sc", None))}
+
+
+def test_plain_base_is_cymatics_alone(tmp_path, monkeypatch):
+    """`base_plain` の曲は base に振り付けも入れない（素の cymatics）。"""
+    from emotion_effecter import workflow
+    m = SimpleNamespace(base_plain=True, file=lambda role: "img.png")
+    assert workflow.base_look(m, "sc", "backdrop.mp4") == (None, "img.png")
+    m = SimpleNamespace(base_plain=False, file=lambda role: "img.png")
+    assert workflow.base_look(m, "sc", "backdrop.mp4") == ("sc", "backdrop.mp4")
 
 
 def test_tempo_speeds_go_to_emotion_only(tmp_path, monkeypatch):

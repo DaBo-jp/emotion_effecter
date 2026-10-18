@@ -13,6 +13,9 @@
       "keys": {"Verse 1": "verse.jpg", "Chorus 1": "chorus.jpg"},
                                             ← セクションごとのキー画像。背景がその画像に
                                               切り替わり、effect もその画像に合わせて置く
+      "base_plain": true                    ← base.mp4 を素の cymatics にする（sections も
+                                              キー画像も入れない）。書かなければ base にも
+                                              振り付け（sections・置き場所・背景）が入る
       "tempo": {"bars_calm": 8},            ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
       "overlays": [{"effect": "crowd", ...}],  ← 主役の上や下に重ねる層（`overlay.py`）
       "audience": {"lead": 12.3, "spread": 2}  ← 聴衆の映像の時刻合わせと取り方（無くてもいい）
@@ -43,7 +46,7 @@ from . import tempo as tempo_mod
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
-        "audience", "keys")
+        "audience", "keys", "base_plain")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
 AUDIENCE_KEYS = ("lead", "spread")
 
@@ -70,6 +73,8 @@ class Manifest:
     spread: float = 2.0
     #: セクション名 → キー画像の絶対パス。名前の照合は歌詞と合わせる `workflow` で
     keys: Mapping[str, str] = field(default_factory=dict)
+    #: base.mp4 を素の cymatics にするか（`base` の引数と `files.image` だけで描く）
+    base_plain: bool = False
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -168,6 +173,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad += ["%s が無い" % k for k in ("title", "files", "base") if k not in doc]
     bad += _files(root, doc.get("files", {}))[1]
     bad += _keys(root, doc.get("keys", {}))[1]
+    bad += [] if isinstance(doc.get("base_plain", False), bool) else ["base_plain は true / false"]
     try:
         effect, params = base_of(doc.get("base", {}))
         bad += _keys_problems(doc, effect, params)
@@ -204,4 +210,5 @@ def load(root: str | Path) -> Manifest:
                 _notes_dropped(doc.get("sections", {})),
                 tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None,
                 overlay_mod.from_list(doc.get("overlays", [])),
-                *_audience_of(doc), _keys(root, doc.get("keys", {}))[0])
+                *_audience_of(doc), _keys(root, doc.get("keys", {}))[0],
+                doc.get("base_plain", False))
