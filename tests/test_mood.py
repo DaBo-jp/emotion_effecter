@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from emotion_effecter import lyrics, mood
+from emotion_effecter import dims, lyrics, mood
 
 TEXT = """[Verse 1]
 a
@@ -47,3 +47,8 @@ def test_load_rejects_other_formats(tmp_path):
 
 def test_questions_cover_every_dimension():
     assert set(mood.DIMS) | {"emotion"} == set(mood.QUESTIONS)
+
+
+def test_seasons_are_scored_and_selectable():
+    assert set(mood.SEASON_CUES) == set(dims.SEASONS) <= set(mood.DIMS)
+    assert set(dims.SEASONS) | {"love", "hate", "tense"} <= set(dims.AXES)

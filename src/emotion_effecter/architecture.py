@@ -26,6 +26,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "lyrics": 0,          # 歌詞ファイル
     "beats": 0,           # 音源 → 拍（cymatics の decode だけ使う）
     "video": 0,           # ffmpeg
+    "grade": 0,           # 画面ぜんたいの色調（灰色・セピア）
 
     # 10 — 次元や歌詞を使う判断。互いに知らない
     "policy": 10,         # 感情 → 見た目。描画を知らない
@@ -40,10 +41,13 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "sync": 10,           # 聴衆の映像と曲の音源の時刻合わせ
     "windows": 10,        # 歌詞の無いライブ動画を小節で区切る
     "audience": 10,       # 聴衆の映像 → Jev（区間ごとの盛り上がり）。時刻合わせは知らない
+    "scenery": 10,        # キー画像 → Jev（目印の場所と、effect をどこに添えるか）
+    "backdrop": 10,       # セクションごとのキー画像 → 背景の動画
 
     # 20 — 判断を束ねる。互いに知らない
     "manifest": 20,       # song.json（曲の宣言）。policy で写像を検証する
     "timeline": 20,       # 採点を時間に敷く
+    "placement": 20,      # キー画像の解析 → effect の置き場所の引数
 
     # 25 — 曲の宣言を使う宣言
     "livefile": 25,       # live.json（ライブ動画1本）。base の読み方は manifest と同じ

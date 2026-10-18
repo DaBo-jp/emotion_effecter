@@ -14,6 +14,8 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
 - 重ねる層（`overlay.Overlay`）があれば cymatics の重ね合わせで描く。主役の層は
   上と同じ包み方、重ねる層は感情で動かす項目（`moods`）だけを差し替える。
   無ければ今までと同じ1枚の道を通る ∴ 画素は変わらない
+- 画面の色調（灰色・セピア）は層ではなく、重ね終えた画面に掛ける（cymatics の
+  `finish`）。動かさない Policy なら `finish` を渡さない ∴ 画素は変わらない
 """
 from __future__ import annotations
 
@@ -27,10 +29,13 @@ from typing import Any
 
 import numpy as np
 from cymatics import effects
+from cymatics.model import holes as holes_mod
 from cymatics.render import pipeline
+from PIL import Image
 
+from . import grade
 from .overlay import Overlay
-from .policy import Look, Policy, look
+from .policy import Look, Policy, look, tone, toned
 from .scenes import Scenes
 from .timeline import Timeline
 
@@ -55,11 +60,35 @@ def variant(m, ctx, over: Mapping[str, Any]):
     return replace(c, work=m.stage(c))
 
 
+def section_holes(ctx, over: Mapping[str, Any]) -> np.ndarray | None:
+    """そのセクションの透かす円の濃さ（画面の大きさ）。円が無ければ None。
+
+    cymatics の円は画面の座標なので、**箱も回しも無い層だけ**に掛けられる。
+    """
+    if not over.get("holes"):
+        return None
+    if ctx.quad is not None or not ctx.box.is_full:
+        raise ValueError("セクションごとの holes は、箱（box_*）も回し・台形も無い層だけ")
+    unit = over.get("holes_unit", ctx.s.get("holes_unit", "px"))
+    return holes_mod.of(over["holes"], unit, ctx.plan.width, ctx.plan.height)
+
+
+def _holed(m, img, ctx, fr, k: np.ndarray):
+    """描く前との差を `k` 倍にして描く（cymatics の pipeline の円と同じ式）。"""
+    before = np.array(img, np.float32)
+    after = np.asarray(m.draw(img, ctx, fr) or img, np.float32)
+    out = before + (after - before) * k[..., None]
+    return Image.fromarray(np.clip(np.rint(out), 0, 255).astype(np.uint8))
+
+
 def in_scenes(m, img, ctx, fr, parts):
-    """セクションの引数ごとに描き重ねる。濃さは `fr.wa` に掛けて分け合う。"""
+    """セクションの引数ごとに描き重ねる。濃さは `fr.wa` に掛けて分け合う。
+    セクションに透かす円があれば、その層の絵だけを円で薄める。"""
     for over, k in parts:
         f = fr if k == 1.0 else replace(fr, wa=fr.wa * k)
-        img = m.draw(img, variant(m, ctx, over), f) or img
+        holes = section_holes(ctx, over)
+        c = variant(m, ctx, over)
+        img = m.draw(img, c, f) or img if holes is None else _holed(m, img, c, f, holes)
     return img
 
 
@@ -96,6 +125,17 @@ def wrap_overlay(eff: effects.Effect, ov: Overlay, tl: Timeline | None) -> effec
 
     mod.draw = draw
     return replace(eff, module=mod)
+
+
+def finisher(tl: Timeline | None, pol: Policy):
+    """重ね終えた画面の仕上げ（cymatics の `finish`）。色調を動かさないなら None。"""
+    if tl is None or not toned(pol):
+        return None
+
+    def finish(img, f):
+        return grade.apply(img, *tone(tl.frame(f), pol))
+
+    return finish
 
 
 def chunk_safe(effect: str, ovs: Sequence[Overlay] = ()) -> bool:
@@ -147,10 +187,11 @@ def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     if sc is not None and sc.is_plain:
         sc = None
     main = wrap(eff, tl, pol, sc) if tl or sc else eff
+    finish = finisher(tl, pol)
     if not ovs:
-        return pipeline.render(main, s)
+        return pipeline.render(main, s, finish)
     comp, get = _stacked(main, s, ovs, tl)
-    return pipeline.render_composition(comp, get.__getitem__)
+    return pipeline.render_composition(comp, get.__getitem__, finish)
 
 
 # ------------------------------------------------------------- 区間に分けて書く

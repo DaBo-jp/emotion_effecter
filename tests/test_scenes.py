@@ -124,9 +124,10 @@ def test_untimed_lyrics_are_refused():
         scenes.build(lyrics.parse("<!--\nS\n-->\n[Verse]\na\n"), {}, "motif", FPS)
 
 
-def test_keys_are_flow_fields_of_cymatics():
-    """変えられる項目は cymatics の宣言に実在する。名前が変われば落ちる。"""
-    names = {f.name for f in effects.get("motif").fields}
+def test_keys_are_fields_of_cymatics():
+    """変えられる項目は cymatics の宣言に実在する（motif か arc のどちらか）。名前が
+    変われば落ちる。"""
+    names = {f.name for e in ("motif", "arc") for f in effects.get(e).fields}
     assert set(scenes.KEYS) <= names
 
 
@@ -257,11 +258,13 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
     monkeypatch.setattr(workflow, "paces", lambda *a: "paces")
     monkeypatch.setattr(workflow, "tempo_extra", lambda m, song, moods, ps, say: ps)
     monkeypatch.setattr(workflow, "produce",
-                        lambda m, out, tl, o, jobs=0, sc=None: got.update({out: (tl, sc)}))
+                        lambda m, out, tl, o, jobs=0, sc=None, image=None:
+                        got.update({out: (tl, sc)}))
 
     @dataclass(frozen=True)
     class _M:
         tempo: object = None
+        keys: tuple = ()
 
         def file(self, role):
             return None

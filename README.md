@@ -145,6 +145,32 @@ out/<曲>/                   出力。全部作り直せるもの
   音で合わないとき（山が鈍いとき）は理由を添えて断るので、`audience.lead`（映像の
   中で曲が始まる秒）を手で書く。映像は短い辺 280px 以上。Jev の画像入力は
   TypeSafe で「dreamer-ready」（試作向け）の扱い
+- `keys` に**セクションごとのキー画像**を書くと、背景がセクションごとにその画像へ
+  切り替わり（境界は2秒のクロスフェード）、effect もその画像に合わせて置かれる。
+  書いていないセクションは前のセクションの画像のまま（最初は `files.image`）
+
+  ```json
+  "base": {"effect": "arc", "params": {"beam": 0}},
+  "keys": {"Verse 1": "verse.jpg", "Chorus 1": "chorus.jpg", "Bridge": "bridge.jpg"}
+  ```
+
+  キー画像ごとに Jev の画像入力で2つ聞く（`scenery/` に残す。画像・effect・歌詞が
+  同じなら聞き直さない、`--redo scenery`）——**目印の箱**（顔・人物・空・地面・光源、
+  Box）と有無（Noul）、それから**その曲の effect をどの目印に添えるか**（Choice:
+  頭を囲む / 空 / 地面 / 光源 / 人物の脇 / 画面いっぱい）。座標は Jev に作らせず、
+  `placement` がコードで出す:
+
+  | effect が持つ引数 | 出すもの |
+  |---|---|
+  | `cx` / `cy` / `radius`（arc・iris・wreath・corona） | 円の中心と半径。頭なら顔を囲む大きさ |
+  | `flow_x` / `flow_y`（motif・smoke・rune） | 流れの中心 |
+  | `holes` | **主人公の顔を透かす円**（頭を囲むとき以外は必ず） |
+
+  置き場所は振り付けなので **base.mp4 にも効く**。`sections` に手で書いた値が勝つ。
+  背景が動画になるので明滅（`beam`）は使えない（書いていなければ断る）。
+  Box は短い物の名前で聞き、歌詞などとは別のリクエストにする——長い日本語の説明や
+  同じリクエストの他の質問があると、顔の箱が全身に広がった。「空いた場所」は箱に
+  ならない（confidence 0.03）ので、人物の箱の左右の広い方をコードで出す
 - `_` で始まる鍵は注記。**知らない項目・足りない項目・無いファイルは全部並べて断る**
 
 ```
@@ -280,7 +306,7 @@ cli         入口
 
 ### 採点（`mood`）
 
-1セクション = 1リクエストで、Score 5つと Choice 1つを並列に投げる。
+1セクション = 1リクエストで、Score 12 個と Choice 1つを並列に投げる。
 
 | 質問 | 型 | 中身 |
 |---|---|---|
@@ -289,6 +315,10 @@ cli         入口
 | acceptance | Score 5段階 | 受容（拒む → 受け入れる）。相手・世界・自分の状況のどれでもいい |
 | conflict | Score 4段階 | 葛藤（定まっている → 引き裂かれている） |
 | dominance | Score 5段階 | 主導権（支配されている → 委ねる → 対等 → 主導 → 支配） |
+| love | Score 5段階 | 愛（無関心 → 冷めている → 惹かれる → 想う → 愛している）。憎しみは hate で別に聞く |
+| hate | Score 5段階 | 憎しみ（無関心 → 疎ましい → 反感 → 恨む → 憎んでいる）。love と両方高ければ愛憎 |
+| tense | Score 5段階 | 時制（過去 → 過去寄り → 現在 → 未来寄り → 未来）。0.5 が現在 |
+| spring / summer / autumn / winter | Score 4段階 ×4 | 季節をそれぞれ（感じられない → 強く感じる）。巡るので1本の軸にしない |
 | emotion | Choice | defiance / desire / doubt / fear / longing / resignation / hope / surrender |
 
 質問は曲を選ばない。受容の相手は「相手・世界・自分の状況」のどれでもよく、
@@ -328,6 +358,12 @@ Script での実測：Pre-Chorus の margin 7.19 に対して、間奏・Bridge�
 | 色相の揺れ（`wobble_by`） | conflict | 最大 ±28°、周期の割り切れない2つの正弦 |
 | glow（`glow_by`） | valence | ×0.5 〜 ×1.8 |
 | バンドレベル（`gain_by`） | arousal | ×0.9 〜 ×1.1（歌詞から読んだ昂ぶりなので控えめ） |
+| 画面の灰色（`gray_by`） | valence | `gray_lo` 〜 `gray_hi`（0=今の彩度、1=グレースケール）。既定は動かさない |
+| 画面のセピア（`sepia_by`） | tense | `sepia_lo` 〜 `sepia_hi`（0=そのまま、1=セピア）。既定は動かさない |
+
+灰色とセピアは**画面ぜんたい**（背景も重ねた層も）に掛かる。cymatics の `finish`
+（重ね終えた画面を仕上げる口）に渡す。過去を振り返るほどセピアなら
+`"sepia_by": "tense", "sepia_lo": 0.8, "sepia_hi": 0`。
 
 **どの次元で何を動かすかは曲ごとに選ぶ**（`song.json` の `policy`）。曲によって
 物語の軸が違う——Script / イセカイ / Shape は受容、Architecture は主導権。

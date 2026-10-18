@@ -10,6 +10,12 @@
 | 色相の揺れ（`wobble_by`） | conflict（葛藤） | 最大 ±`wobble_deg` 度 |
 | glow（`glow_by`） | valence（快） | `glow_lo` 〜 `glow_hi` 倍 |
 | バンドレベル（`gain_by`） | arousal（昂ぶり） | `gain_lo` 〜 `gain_hi` 倍。控えめ |
+| 画面の灰色（`gray_by`） | valence（快） | `gray_lo` 〜 `gray_hi`。0=今の彩度、1=灰色 |
+| 画面のセピア（`sepia_by`） | tense（時制） | `sepia_lo` 〜 `sepia_hi`。0 でそのまま、1 でセピア |
+
+灰色とセピアは**画面ぜんたい**（背景も重ねた層も）に掛かる（`grade`）。既定は
+lo も hi も 0 で動かさない——過去を振り返るほどセピア、なら
+`"sepia_by": "tense", "sepia_lo": 0.8, "sepia_hi": 0`。
 
 **どの次元で動かすかは曲ごとに選べる。** 曲によって物語の軸が違う——Script /
 イセカイ / Shape は受容、Architecture は主導権。`color_invert` で向きを返せる
@@ -46,6 +52,8 @@ class Policy:
     wobble_by: str = "conflict"
     glow_by: str = "valence"
     gain_by: str = "arousal"
+    gray_by: str = "valence"
+    sepia_by: str = "tense"
     #: 真なら color_by の値を 1 − 値 にしてから使う
     color_invert: bool = False
     #: color_by=1 で行き着く色
@@ -64,6 +72,12 @@ class Policy:
     #: arousal 0 / 1 でのバンドレベルの倍率
     gain_lo: float = 0.9
     gain_hi: float = 1.1
+    #: gray_by 0 / 1 での灰色の量（0=今の彩度、1=グレースケール）
+    gray_lo: float = 0.0
+    gray_hi: float = 0.0
+    #: sepia_by 0 / 1 でのセピアの量（0=そのまま、1=セピア）
+    sepia_lo: float = 0.0
+    sepia_hi: float = 0.0
 
     def problems(self) -> list[str]:
         """範囲を外れた項目を全部。空なら通る。"""
@@ -88,7 +102,7 @@ class Policy:
 
 
 #: 次元を選ぶ項目
-BY: tuple[str, ...] = ("color_by", "wobble_by", "glow_by", "gain_by")
+BY: tuple[str, ...] = ("color_by", "wobble_by", "glow_by", "gain_by", "gray_by", "sepia_by")
 
 #: 数値の項目の範囲（両端を含む）。**範囲の宣言はここだけ**
 RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
@@ -99,6 +113,10 @@ RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
     "glow_hi": (0.0, 10.0),
     "gain_lo": (0.0, 4.0),
     "gain_hi": (0.0, 4.0),
+    "gray_lo": (0.0, 1.0),
+    "gray_hi": (0.0, 1.0),
+    "sepia_lo": (0.0, 1.0),
+    "sepia_hi": (0.0, 1.0),
 })
 
 
@@ -185,3 +203,22 @@ def look(mood: Mapping[str, float], t: float, base: RGB, pol: Policy = Policy())
     return Look(color=col,
                 glow=_lerp(pol.glow_lo, pol.glow_hi, mood[pol.glow_by]),
                 gain=_lerp(pol.gain_lo, pol.gain_hi, mood[pol.gain_by]))
+
+
+def toned(pol: Policy) -> bool:
+    """画面の色調（灰色・セピア）を動かすか。動かさないなら画面に触らない。"""
+    return any(getattr(pol, k) > 0.0 for k in ("gray_lo", "gray_hi", "sepia_lo", "sepia_hi"))
+
+
+def tone(mood: Mapping[str, float], pol: Policy = Policy()) -> tuple[float, float]:
+    """そのフレームの (灰色の量, セピアの量)。どちらも 0..1。
+
+    lo と hi が同じなら軸を読まない——動かさない方の軸（既定の `tense` など）が
+    曲線に無くても困らない。
+    """
+    return (_by(mood, pol.gray_by, pol.gray_lo, pol.gray_hi),
+            _by(mood, pol.sepia_by, pol.sepia_lo, pol.sepia_hi))
+
+
+def _by(mood: Mapping[str, float], by: str, lo: float, hi: float) -> float:
+    return lo if lo == hi else _lerp(lo, hi, mood[by])

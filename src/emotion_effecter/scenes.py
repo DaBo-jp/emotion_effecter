@@ -1,7 +1,11 @@
 """セクションごとに層の引数を変える。**変えられるのは流れの向き（`--flow` など）と
 流れ・踊りの速さと湧く数（`--speed` / `--rate` / `--sway-hz` / `--rock-hz`）と
 落下（motif の `--gravity`）と、図形と向き（motif の `--shape` / `--align`。
-星で集まり、火花で弾ける）。**
+星で集まり、火花で弾ける）と、置き場所（円の中心と半径 `--cx` / `--cy` / `--radius`、
+透かす円 `--holes` / `--holes-unit`。キー画像に合わせる `placement` が出す）。**
+
+透かす円は cymatics では層の外側（pipeline）で掛かるので、セクションごとの円は
+`drive` が描いた直後に掛ける。base にも円があれば両方が掛かる（濃さの積）。
 
 落下は経過時間の2乗で効く ∴ 集まる（in）・ゆっくり渡る区間では 0 にしないと
 真下へ落ちるだけになる——火花を外へ散らす区間でだけ立てる。
@@ -45,7 +49,8 @@ from .lyrics import Song
 #: セクションごとに変えられる項目
 KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist",
                          "speed", "rate", "sway_hz", "rock_hz", "gravity",
-                         "shape", "align")
+                         "shape", "align",
+                         "cx", "cy", "radius", "holes", "holes_unit")
 
 #: 倍率で書ける項目 → 掛ける先の項目
 SCALES: Mapping[str, str] = MappingProxyType({"density": "rate"})

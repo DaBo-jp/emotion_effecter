@@ -10,6 +10,9 @@
               {"effect": "rune", "params": {...}},   ← effect と引数
       "policy": {"warm": "255,120,56", "turn": 0},
       "sections": {"Chorus 1": {"flow": "in"}},  ← セクションごとの流れの向き（`scenes.py`）
+      "keys": {"Verse 1": "verse.jpg", "Chorus 1": "chorus.jpg"},
+                                            ← セクションごとのキー画像。背景がその画像に
+                                              切り替わり、effect もその画像に合わせて置く
       "tempo": {"bars_calm": 8},            ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
       "overlays": [{"effect": "crowd", ...}],  ← 主役の上や下に重ねる層（`overlay.py`）
       "audience": {"lead": 12.3, "spread": 2}  ← 聴衆の映像の時刻合わせと取り方（無くてもいい）
@@ -40,7 +43,7 @@ from . import tempo as tempo_mod
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
-        "audience")
+        "audience", "keys")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
 AUDIENCE_KEYS = ("lead", "spread")
 
@@ -65,6 +68,8 @@ class Manifest:
     lead: float | None = None
     #: 聴衆の映像から、セクションの中ほどの前後何秒からも取るか
     spread: float = 2.0
+    #: セクション名 → キー画像の絶対パス。名前の照合は歌詞と合わせる `workflow` で
+    keys: Mapping[str, str] = field(default_factory=dict)
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -94,6 +99,30 @@ def _files(root: Path, files: Mapping[str, str]) -> tuple[dict[str, str], list[s
     out = {r: str((root / n).resolve()) for r, n in files.items()}
     bad += ["%s が無い: %s" % (r, p) for r, p in out.items() if not Path(p).is_file()]
     return out, bad
+
+
+def _keys(root: Path, doc: Any) -> tuple[dict[str, str], list[str]]:
+    """`keys`（セクション名 → キー画像）。書き方の駄目と、無いファイルを全部。"""
+    if not isinstance(doc, Mapping):
+        return {}, ["keys は {セクション名: 画像のファイル名}"]
+    doc = _notes_dropped(doc)
+    bad = ["keys.%s は画像のファイル名" % k for k, v in doc.items() if not isinstance(v, str)]
+    out = {k: str((root / v).resolve()) for k, v in doc.items() if isinstance(v, str)}
+    bad += ["keys.%s の画像が無い: %s" % (k, p) for k, p in out.items() if not Path(p).is_file()]
+    return out, bad
+
+
+def _keys_problems(doc: Mapping[str, Any], effect: str, params: Mapping[str, Any]) -> list[str]:
+    """キー画像の背景は動画になる。cymatics は動画の背景で明滅（beam）を使えない。"""
+    if not _notes_dropped(doc.get("keys", {})):
+        return []
+    from cymatics import effects
+
+    beam = {f.name: f.default for f in effects.get(effect).fields}.get("beam", 0)
+    if float(params.get("beam", beam)) > 0:
+        return ["keys: キー画像の背景は動画になるので明滅は使えない"
+                "（base の params に \"beam\": 0 と書く）"]
+    return []
 
 
 def _audience_problems(doc: Mapping[str, Any]) -> list[str]:
@@ -138,8 +167,10 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad = ["知らない項目: %s" % k for k in sorted(set(doc) - set(KEYS))]
     bad += ["%s が無い" % k for k in ("title", "files", "base") if k not in doc]
     bad += _files(root, doc.get("files", {}))[1]
+    bad += _keys(root, doc.get("keys", {}))[1]
     try:
-        effect = base_of(doc.get("base", {}))[0]
+        effect, params = base_of(doc.get("base", {}))
+        bad += _keys_problems(doc, effect, params)
         bad += ["sections: " + p for p in scenes_mod.problems(doc.get("sections", {}), effect)]
         bad += _tempo_problems(doc, effect)
     except (ValueError, KeyError) as e:
@@ -173,4 +204,4 @@ def load(root: str | Path) -> Manifest:
                 _notes_dropped(doc.get("sections", {})),
                 tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None,
                 overlay_mod.from_list(doc.get("overlays", [])),
-                *_audience_of(doc))
+                *_audience_of(doc), _keys(root, doc.get("keys", {}))[0])
