@@ -36,7 +36,7 @@ wheels = [
 [[package]]
 name = "cymatics"
 version = "0.1.0"
-source = { git = "https://github.com/DaBo-jp/cymatics.git#5b0ebfc6daead1468476ede72d10e99711cafd61" }
+source = { git = "https://github.com/DaBo-jp/cymatics.git#39efd1d2d19ae6d635591adcdbd3db8d115a25f2" }
 dependencies = [
     { name = "numpy" },
     { name = "pillow" },
