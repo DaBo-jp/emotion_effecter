@@ -277,11 +277,22 @@ def base_look(m: Manifest, sc: scenes.Scenes, image: str, rl: roll.Roll | None =
     return (None, m.file("image"), None) if m.base_plain else (sc, image, rl)
 
 
-def credits_of(m: Manifest, song: lyrics.Song) -> roll.Roll | None:
-    """流れる歌詞の配置。song.json に `credits` が無ければ None。"""
+def credits_of(m: Manifest, o: Outputs, song: lyrics.Song, redo: Iterable[str],
+               say: Say) -> roll.Roll | None:
+    """流れる歌詞の配置。song.json に `credits` が無ければ None。`credits.pace` なら
+    気持ちの速さ（Jev、pace.json）と BPM（`credits.bpm` → `tempo.bpm` → 推定）も渡す。"""
     if m.credits is None:
         return None
-    return roll.layout(song, audio.duration(m.file("audio")), size_of(m), m.credits, m.root)
+    paced = bool(m.credits.get("pace"))
+    probs = [None if p is None else dict(p.probabilities)
+             for p in timeline.align(song, paces(m, o, redo, say), "気持ちの速さ")] \
+        if paced else None
+    bpm = 0.0
+    if paced and not m.credits.get("bpm"):
+        bpm = (m.tempo.bpm if m.tempo is not None and m.tempo.bpm else
+               analyze(m.file("audio")).bpm)
+    return roll.layout(song, audio.duration(m.file("audio")), size_of(m), m.credits, m.root,
+                       probs, bpm)
 
 
 def _merge(*extras: list[dict] | None) -> list[dict] | None:
@@ -367,7 +378,7 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
     """
     tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
     place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
-    sc, rl = build_scenes(m, song, extra=place), credits_of(m, song)
+    sc, rl = build_scenes(m, song, extra=place), credits_of(m, o, song, redo, say)
     sc_mood = emotion_scenes(m, o, song, moods, redo, say, place)
     ends = [s.start for s in song.sections[1:]] + [audio.duration(m.file("audio"))]
     rows = []
@@ -395,7 +406,7 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
     steps, redo = set(steps), set(redo)
     moods, song = score(m, o, redo, say), sections(m, o, redo, say)
     place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
-    sc, rl = build_scenes(m, song, extra=place), credits_of(m, song)
+    sc, rl = build_scenes(m, song, extra=place), credits_of(m, o, song, redo, say)
     if "emotion" in steps:
         tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
         produce(m, o["emotion"], tl, o, jobs,

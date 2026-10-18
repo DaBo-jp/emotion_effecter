@@ -37,6 +37,18 @@
 `edge_fade` を書くと、流れる文字が画面の上下の端でその幅（画面の高さに対する比）を
 かけて薄れて消える・浮かんでくる。帯は薄れない。
 
+`pace: true` で、**Jev の気持ちの速さ（`pace`、linger / walk / rush の確率）と BPM**
+で、セクションごとに流れ方を変える。値は確率で重みづけした平均（`PACE_*`、仮置き）:
+
+- 行の送り（`PACE_LINE`）——急くほど行間が広く、流れが速く見える
+- 拍ごとの刻み（`PACE_PULSE`）——0 で滑らかに流れ、1 で拍の頭でキュッと進んで止まる
+  （ease-out）。拍はセクションの頭から数える。平均の速さは変えない ∴ 各セクションの
+  頭が開始時刻に基準の高さを通るのは同じ
+- 上下のフェードの幅（`PACE_EDGE`）——たゆたうほど広い。境目は `EDGE_SWITCH` 秒で移る
+
+間奏（歌詞の判断が無い）は刻まず、フェードは `edge_fade`。BPM は `bpm`（書かなければ
+呼ぶ側が渡す値）。
+
 帯は `band` の色を不透明度 `band_alpha` で敷く。文字は列の中で中央揃え、列に
 収まらない行は折り返す（空白があれば語の切れ目で、無ければ文字で）。
 
@@ -47,7 +59,7 @@ from __future__ import annotations
 
 import subprocess
 from bisect import bisect_right
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -87,6 +99,8 @@ DEFAULTS: Mapping[str, Any] = MappingProxyType({
     "fade": 0.5,             # card の浮かぶ・消える秒数
     "band_fade": 2.0,        # 交互の縦の帯が濃くなりきるまでの、見えている文字の行数
     "edge_fade": 0.0,        # roll の文字が上下の端で薄れる幅 ÷ 画面の高さ。0 で薄れない
+    "pace": False,           # Jev の気持ちの速さと BPM で、行の送り・拍の刻み・フェードを変える
+    "bpm": 0.0,              # pace のときの BPM。0 なら呼ぶ側が渡す値
     "band": "0,0,0",
     "band_alpha": 0.4,
     "color": "255,255,255",
@@ -115,7 +129,23 @@ EPS = 1e-9
 RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
     "band_alpha": (0.0, 1.0), "size": (0.005, 0.2), "width": (0.05, 1.0),
     "margin": (0.0, 0.45), "anchor": (0.0, 1.0), "gap": (0.0, 20.0), "line": (1.0, 4.0),
-    "fade": (0.0, 5.0), "band_fade": (0.0, 20.0), "edge_fade": (0.0, 0.5)})
+    "fade": (0.0, 5.0), "band_fade": (0.0, 20.0), "edge_fade": (0.0, 0.5),
+    "bpm": (0.0, 400.0)})
+
+#: 気持ちの速さ → 行の送り ÷ 文字の高さ（`line` の代わり）。仮置き
+PACE_LINE: Mapping[str, float] = MappingProxyType({"linger": 1.3, "walk": 1.5, "rush": 1.9})
+#: 気持ちの速さ → 拍ごとの刻みの強さ（0 で滑らか、1 で拍の頭で進んで止まる）。仮置き
+PACE_PULSE: Mapping[str, float] = MappingProxyType({"linger": 0.0, "walk": 0.5, "rush": 1.0})
+#: 気持ちの速さ → 上下のフェードの幅 ÷ 画面の高さ（`edge_fade` の代わり）。仮置き
+PACE_EDGE: Mapping[str, float] = MappingProxyType({"linger": 0.5, "walk": 0.3, "rush": 0.15})
+#: フェードの幅がセクションの境目で移る秒数
+EDGE_SWITCH = 2.0
+#: 上下のフェードの濃さの作り置きの刻み（幅をこの単位に丸めて使い回す）
+EDGE_QUANT = 0.01
+#: 拍の刻みの ease-out の次数（大きいほど拍の頭で一気に進む）
+EASE_POWER = 3
+#: 1分の秒数
+MINUTE = 60.0
 
 
 @dataclass(frozen=True)
@@ -128,6 +158,12 @@ class Block:
     #: 塊の高さ（px、セクションの間の空きを含む）
     height: float
     side: str
+    #: 行の送り（px）
+    step: float
+    #: 拍ごとの刻みの強さ 0..1（0 で滑らか）
+    pulse: float = 0.0
+    #: 上下のフェードの幅 ÷ 画面の高さ
+    edge: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -137,12 +173,13 @@ class Roll:
     keys: tuple[tuple[float, float], ...]
     size: tuple[int, int]
     px: int                  # 文字の高さ
-    step: float              # 行の送り
     #: `credits` の中身（既定値で埋めたもの）。並列の書き出しで別プロセスへ渡すので
     #: pickle できる形（項目の組の tuple）で持つ——MappingProxyType は pickle できない
     options: tuple[tuple[str, Any], ...]
     #: 使うフォントのファイルと、その中の番号（.ttc）
     font: tuple[str, int]
+    #: 拍の刻みに使う BPM。0 なら刻まない
+    bpm: float = 0.0
 
     @property
     def cfg(self) -> Mapping[str, Any]:
@@ -154,7 +191,38 @@ class Roll:
         ts = [k[0] for k in self.keys]
         i = min(max(bisect_right(ts, t) - 1, 0), len(ts) - 2)
         (t0, y0), (t1, y1) = self.keys[i], self.keys[i + 1]
-        return y0 + (y1 - y0) * (t - t0) / max(t1 - t0, EPS)
+        pulse = self.blocks[i].pulse if i < len(self.blocks) and t0 <= t <= t1 else 0.0
+        k = pulsed((t - t0) / max(t1 - t0, EPS), (t1 - t0) * self.bpm / MINUTE, pulse)
+        return y0 + (y1 - y0) * k
+
+    def edge_at(self, t: float) -> float:
+        """時刻 t の上下のフェードの幅。セクションの境目で `EDGE_SWITCH` 秒かけて移る。"""
+        ts = [k[0] for k in self.keys[:len(self.blocks)]]
+        i = min(max(bisect_right(ts, t) - 1, 0), len(ts) - 1)
+        half, e = EDGE_SWITCH / 2, self.blocks[i].edge
+        if i + 1 < len(ts) and t > ts[i + 1] - half:
+            k = (t - (ts[i + 1] - half)) / EDGE_SWITCH
+            return e + (self.blocks[i + 1].edge - e) * k
+        if i > 0 and t < ts[i] + half:
+            k = (t - (ts[i] - half)) / EDGE_SWITCH
+            return self.blocks[i - 1].edge + (e - self.blocks[i - 1].edge) * k
+        return e
+
+
+def pulsed(frac: float, beats: float, pulse: float) -> float:
+    """区間の進み 0..1 を、拍ごとに刻んだ進みにする。`beats` は区間の拍の数。
+
+    拍の中は ease-out（拍の頭で進んで止まる）を `pulse` だけ混ぜる。最後の半端な拍は
+    直線 ∴ 区間の端（0 と 1）は動かない——各セクションの頭の時刻は保たれる。
+    """
+    if pulse <= 0 or beats < 1 or not 0 <= frac <= 1:
+        return frac
+    u, whole = frac * beats, int(beats)
+    if u >= whole:
+        return frac
+    f = u - int(u)
+    eased = 1 - (1 - f) ** EASE_POWER
+    return (int(u) + (1 - pulse) * f + pulse * eased) / beats
 
 
 def problems(doc: Any, root: Path | None = None) -> list[str]:
@@ -168,6 +236,8 @@ def problems(doc: Any, root: Path | None = None) -> list[str]:
         bad.append("credits.position=%r は %s のどれか" % (cfg["position"], " / ".join(POSITIONS)))
     if cfg["mode"] not in MODES:
         bad.append("credits.mode=%r は %s のどれか" % (cfg["mode"], " / ".join(MODES)))
+    if not isinstance(cfg["pace"], bool):
+        bad.append("credits.pace=%r は true / false" % (cfg["pace"],))
     if cfg["direction"] not in DIRECTIONS:
         bad.append("credits.direction=%r は %s のどれか"
                    % (cfg["direction"], " / ".join(DIRECTIONS)))
@@ -266,27 +336,55 @@ def _sides(song: Song, position: str) -> list[str]:
     return out
 
 
+def _weighted(table: Mapping[str, float], probs: Mapping[str, float]) -> float:
+    """気持ちの速さの確率で重みづけした値。"""
+    total = sum(probs.get(k, 0.0) for k in table)
+    return sum(v * probs.get(k, 0.0) for k, v in table.items()) / max(total, EPS)
+
+
+def _feel(cfg: Mapping[str, Any], probs: Mapping[str, float] | None) -> tuple[float, float, float]:
+    """セクションの (行の送り ÷ 文字の高さ, 拍の刻み, フェードの幅)。"""
+    if not cfg["pace"] or probs is None:
+        return cfg["line"], 0.0, cfg["edge_fade"]
+    return (_weighted(PACE_LINE, probs), _weighted(PACE_PULSE, probs),
+            _weighted(PACE_EDGE, probs))
+
+
 def layout(song: Song, duration: float, size: tuple[int, int], cfg: Mapping[str, Any],
-           root: Path | None = None) -> Roll:
-    """開始時刻つきの歌詞と曲の尺から、流れる配置を作る。`cfg` は `credits`。"""
+           root: Path | None = None, paces: Sequence[Mapping[str, float] | None] | None = None,
+           bpm: float = 0.0) -> Roll:
+    """開始時刻つきの歌詞と曲の尺から、流れる配置を作る。`cfg` は `credits`。
+    `pace` のときは `paces`（セクションごとの気持ちの速さの確率、間奏は None）と BPM が要る。"""
     cfg = {**DEFAULTS, **{k: v for k, v in cfg.items() if not k.startswith("_")}}
+    if cfg["pace"] and (paces is None or len(paces) != len(song.sections)):
+        raise ValueError("credits.pace には、セクションごとの気持ちの速さが要る")
     where = find_font(str(cfg["font"]), str(cfg["weight"]), root)
-    w, h = size
-    px = max(MIN_PX, int(round(cfg["size"] * h)))
-    step, font = px * cfg["line"], _font(where, px, cfg["weight"])
-    lines = [[x for ln in s.lines for x in wrap(ln, font, cfg["width"] * w)]
+    px = max(MIN_PX, int(round(cfg["size"] * size[1])))
+    font = _font(where, px, cfg["weight"])
+    lines = [[x for ln in s.lines for x in wrap(ln, font, cfg["width"] * size[0])]
              for s in song.sections]
+    feel = [_feel(cfg, p) for p in (paces or [None] * len(song.sections))]
+    blocks = _stack(song, duration, cfg, px, lines, feel)
+    keys = [(s.start, b.y) for s, b in zip(song.sections, blocks)]
+    keys.append((duration, blocks[-1].y + blocks[-1].height))
+    return Roll(tuple(blocks), tuple(keys), size, px, tuple(sorted(cfg.items())), where,
+                float(cfg["bpm"] or bpm) if cfg["pace"] else 0.0)
+
+
+def _stack(song: Song, duration: float, cfg: Mapping[str, Any], px: int,
+           lines: list[list[str]], feel: list[tuple[float, float, float]]) -> list[Block]:
+    """セクションの塊を積む。間奏は、歌った区間の平均の速さぶんの空白。"""
     ends = [s.start for s in song.sections[1:]] + [duration]
-    sung = [((len(ls) + cfg["gap"]) * step, e - s.start)
-            for ls, s, e in zip(lines, song.sections, ends) if ls]
+    sung = [((len(ls) + cfg["gap"]) * px * f[0], e - s.start)
+            for ls, s, e, f in zip(lines, song.sections, ends, feel) if ls]
     speed = sum(a for a, _ in sung) / max(sum(b for _, b in sung), EPS)
     blocks, y = [], 0.0
-    for ls, s, e, side in zip(lines, song.sections, ends, _sides(song, cfg["position"])):
-        hgt = (len(ls) + cfg["gap"]) * step if ls else speed * (e - s.start)
-        blocks.append(Block(tuple(ls), y, hgt, side))
+    for ls, s, e, side, (line, pulse, edge) in zip(lines, song.sections, ends,
+                                                    _sides(song, cfg["position"]), feel):
+        hgt = (len(ls) + cfg["gap"]) * px * line if ls else speed * (e - s.start)
+        blocks.append(Block(tuple(ls), y, hgt, side, px * line, pulse, edge))
         y += hgt
-    keys = [(s.start, b.y) for s, b in zip(song.sections, blocks)] + [(duration, y)]
-    return Roll(tuple(blocks), tuple(keys), size, px, step, tuple(sorted(cfg.items())), where)
+    return blocks
 
 
 def column(roll: Roll, side: str) -> tuple[int, int]:
@@ -300,12 +398,12 @@ def column(roll: Roll, side: str) -> tuple[int, int]:
 def _block_image(roll: Roll, b: Block) -> Image.Image:
     """文字の塊の絵（RGBA、列の幅）。行は列の中で中央揃え。"""
     cw = column(roll, b.side)[1] - column(roll, b.side)[0]
-    img = Image.new("RGBA", (cw, int(len(b.lines) * roll.step) + 1), (0, 0, 0, 0))
+    img = Image.new("RGBA", (cw, int(len(b.lines) * b.step) + 1), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     font = _font(roll.font, roll.px, roll.cfg["weight"])
     col = parse_color(str(roll.cfg["color"]))[0]
     for i, ln in enumerate(b.lines):
-        d.text(((cw - font.getlength(ln)) / 2, i * roll.step), ln, font=font,
+        d.text(((cw - font.getlength(ln)) / 2, i * b.step), ln, font=font,
                fill=(*col, OPAQUE))
     return img
 
@@ -320,9 +418,9 @@ def presence(roll: Roll, side: str, shown: list[tuple[Block, int]]) -> float:
     """その側の帯の濃さの倍率 0..1。画面に見えている文字の高さが `band_fade` 行ぶんで
     1 ——文字が入ってくるにつれて濃くなり、出ていくにつれて薄くなる。"""
     h = roll.size[1]
-    seen = sum(max(0, min(top + len(b.lines) * roll.step, h) - max(top, 0))
+    seen = sum(max(0, min(top + len(b.lines) * b.step, h) - max(top, 0))
                for b, top in shown if b.side == side)
-    full = roll.cfg["band_fade"] * roll.step
+    full = roll.cfg["band_fade"] * roll.px * roll.cfg["line"]
     return 1.0 if full <= 0 and seen > 0 else min(1.0, seen / max(full, EPS))
 
 
@@ -342,7 +440,7 @@ def _top(roll: Roll, b: Block, t: float) -> int:
     """時刻 t の、文字の塊の上の端（画面の px）。"""
     a, off = roll.cfg["anchor"] * roll.size[1], roll.offset(t)
     if roll.cfg["direction"] == "down":
-        return int(round(a - (b.y + len(b.lines) * roll.step - off)))
+        return int(round(a - (b.y + len(b.lines) * b.step - off)))
     return int(round(a + (b.y - off)))
 
 
@@ -375,7 +473,7 @@ def draw(img: Image.Image, t: float, roll: Roll, cache: dict) -> Image.Image:
         return out.convert("RGB")
     w, h = roll.size
     shown = [(b, top) for b in roll.blocks if b.lines
-             for top in [_top(roll, b, t)] if top < h and top + len(b.lines) * roll.step > 0]
+             for top in [_top(roll, b, t)] if top < h and top + len(b.lines) * b.step > 0]
     bands, text = (Image.new("RGBA", (w, h), (0, 0, 0, 0)) for _ in range(2))
     _bands(roll, bands, shown)
     for b, top in shown:
@@ -384,8 +482,9 @@ def draw(img: Image.Image, t: float, roll: Roll, cache: dict) -> Image.Image:
         text.alpha_composite(cache[b], (column(roll, b.side)[0], top)) if top >= 0 else \
             text.alpha_composite(cache[b].crop((0, -top, cache[b].width, cache[b].height)),
                                  (column(roll, b.side)[0], 0))
-    if roll.cfg["edge_fade"] > 0:
-        text.putalpha(ImageChops.multiply(text.getchannel("A"), _edges(roll, cache)))
+    edge = round(roll.edge_at(t) / EDGE_QUANT) * EDGE_QUANT
+    if edge > 0:
+        text.putalpha(ImageChops.multiply(text.getchannel("A"), _edges(roll, edge, cache)))
     out = Image.alpha_composite(img.convert("RGBA"), bands)
     return Image.alpha_composite(out, text).convert("RGB")
 
@@ -397,10 +496,11 @@ def edge_ramp(h: int, frac: float) -> np.ndarray:
     return np.clip(np.minimum(y, h - y) / band, 0.0, 1.0)
 
 
-def _edges(roll: Roll, cache: dict) -> Image.Image:
-    """上下のフェードの濃さ（画面の大きさの L）。書き出し1回ぶん作り置く。"""
-    if "edges" not in cache:
+def _edges(roll: Roll, frac: float, cache: dict) -> Image.Image:
+    """上下のフェードの濃さ（画面の大きさの L）。幅ごとに書き出し1回ぶん作り置く。"""
+    key = ("edges", frac)
+    if key not in cache:
         w, h = roll.size
-        ramp = np.rint(edge_ramp(h, roll.cfg["edge_fade"]) * OPAQUE).astype(np.uint8)
-        cache["edges"] = Image.fromarray(np.repeat(ramp[:, None], w, axis=1), "L")
-    return cache["edges"]
+        ramp = np.rint(edge_ramp(h, frac) * OPAQUE).astype(np.uint8)
+        cache[key] = Image.fromarray(np.repeat(ramp[:, None], w, axis=1), "L")
+    return cache[key]

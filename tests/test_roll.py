@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from emotion_effecter import lyrics, roll
+from emotion_effecter import dims, lyrics, roll
 
 SONG = lyrics.parse("""<!--
 S
@@ -40,7 +40,7 @@ def test_up_moves_up_and_down_moves_down():
     assert roll._top(up, b, 3.0) < roll._top(up, b, 2.0)
     assert roll._top(down, down.blocks[1], 3.0) > roll._top(down, down.blocks[1], 2.0)
     # down では塊の下の端が開始時刻に基準の高さを通る
-    bot = roll._top(down, down.blocks[1], 2.0) + 2 * down.step
+    bot = roll._top(down, down.blocks[1], 2.0) + 2 * down.blocks[1].step
     assert bot == pytest.approx(0.5 * SIZE[1], abs=1)
 
 
@@ -122,7 +122,7 @@ def test_alternating_band_is_a_full_height_strip_only_on_the_side_with_lyrics():
 def test_band_fades_in_as_the_lyrics_enter():
     r = _roll(position="left_right", band_fade=2.0)
     b = r.blocks[1]
-    early = [(b, SIZE[1] - int(r.step))]                            # 1行だけ見えている
+    early = [(b, SIZE[1] - int(b.step))]                            # 1行だけ見えている
     late = [(b, 0)]
     assert 0 < roll.presence(r, "left", early) < roll.presence(r, "left", late) == 1.0
     assert roll.presence(r, "right", late) == 0.0
@@ -139,3 +139,52 @@ def test_edge_fade_dims_text_near_the_top_and_bottom_only():
     x0, x1 = roll.column(r0, "left")
     assert a1[5:10, x0:x1].sum() < a0[5:10, x0:x1].sum() or a0[5:10, x0:x1].sum() == 0
     assert np.array_equal(a1[45:55], a0[45:55])          # 真ん中は同じ
+
+
+PACES = [None, {"linger": 0.0, "walk": 0.0, "rush": 1.0}, {"linger": 1.0, "walk": 0.0, "rush": 0.0},
+         None]
+
+
+def _paced(**over):
+    return roll.layout(SONG, 10.0, SIZE, {**CFG, "pace": True, "bpm": 120, **over},
+                       paces=PACES)
+
+
+def test_pace_tables_cover_every_pace():
+    for table in (roll.PACE_LINE, roll.PACE_PULSE, roll.PACE_EDGE):
+        assert tuple(table) == dims.PACES
+
+
+def test_pace_sets_spacing_pulse_and_fade_per_section():
+    r = _paced()
+    verse, chorus = r.blocks[1], r.blocks[2]                 # rush / linger
+    assert verse.step / r.px == roll.PACE_LINE["rush"] and verse.pulse == 1.0
+    assert chorus.step / r.px == roll.PACE_LINE["linger"] and chorus.pulse == 0.0
+    assert (verse.edge, chorus.edge) == (roll.PACE_EDGE["rush"], roll.PACE_EDGE["linger"])
+    assert r.blocks[0].pulse == 0.0 and r.blocks[0].edge == CFG.get("edge_fade", 0.0)
+
+
+def test_pulse_steps_on_the_beat_but_keeps_the_section_heads():
+    """拍ごとに刻んでも、各セクションの頭は開始時刻に基準の高さを通る。"""
+    r = _paced()
+    for name, t in (("Verse 1", 2.0), ("Chorus 1", 6.0)):
+        b = dict(zip([s.name for s in SONG.sections], r.blocks))[name]
+        assert roll._top(r, b, t) == pytest.approx(0.5 * SIZE[1], abs=1)
+    # 120 BPM = 0.5 秒で1拍。拍の頭の直後はもう大きく進んでいる（ease-out）
+    y0, y1, y2 = (r.offset(t) for t in (2.0, 2.1, 2.5))
+    assert (y1 - y0) / (y2 - y0) > 0.4                        # 直線なら 0.2
+    assert roll.pulsed(0.0, 8, 1.0) == 0.0 and roll.pulsed(1.0, 8, 1.0) == 1.0
+    assert roll.pulsed(0.3, 8, 0.0) == 0.3
+
+
+def test_fade_width_moves_between_sections_over_the_switch_time():
+    r = _paced()
+    rush, linger = roll.PACE_EDGE["rush"], roll.PACE_EDGE["linger"]
+    assert r.edge_at(4.0) == pytest.approx(rush)
+    assert r.edge_at(6.0) == pytest.approx((rush + linger) / 2)
+    assert r.edge_at(6.0 + roll.EDGE_SWITCH / 2) == pytest.approx(linger)
+
+
+def test_pace_without_paces_is_refused():
+    with pytest.raises(ValueError, match="気持ちの速さ"):
+        roll.layout(SONG, 10.0, SIZE, {**CFG, "pace": True})
