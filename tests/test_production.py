@@ -122,3 +122,14 @@ def test_credits_go_through_parallel_rendering(tmp_path, media):
     rec = production.produce("stave", params, None, out, opening=opening, closing=closing,
                              jobs=2, chunk_seconds=2, roll=rl)
     assert rec["credits"]["font"] == "DejaVu Sans" and video.count_frames(out) == 60
+
+
+def test_without_clips_the_last_frame_is_not_dropped(tmp_path, media):
+    """Opening も Closing も無い（live など）と本編が曲の終わりまで届く。最後の区間で
+    1フレーム落ちていた（cymatics 04e9e82 で直した）。"""
+    wav, img, _clips = media
+    out = str(tmp_path / "out.mp4")
+    params = dict(audio=wav, image=img, width=128, height=72, fps=FPS, bands=8,
+                  cache_dir=str(tmp_path))
+    production.produce("stave", params, None, out, jobs=2, chunk_seconds=2)
+    assert video.count_frames(out) == 60
