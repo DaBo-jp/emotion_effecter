@@ -126,3 +126,16 @@ def test_band_fades_in_as_the_lyrics_enter():
     late = [(b, 0)]
     assert 0 < roll.presence(r, "left", early) < roll.presence(r, "left", late) == 1.0
     assert roll.presence(r, "right", late) == 0.0
+
+
+def test_edge_fade_dims_text_near_the_top_and_bottom_only():
+    ramp = roll.edge_ramp(100, 0.2)
+    assert ramp[0] < 0.05 and ramp[-1] < 0.05 and ramp[50] == 1.0 and ramp[25] == 1.0
+    assert 0.4 < ramp[10] < 0.6
+    bg = Image.new("RGB", SIZE, (0, 0, 0))
+    r0 = _roll(position="left", band_alpha=0.0)
+    r1 = _roll(position="left", band_alpha=0.0, edge_fade=0.3)
+    a0, a1 = (np.asarray(roll.draw(bg, 2.5, r, {})).astype(int) for r in (r0, r1))
+    x0, x1 = roll.column(r0, "left")
+    assert a1[5:10, x0:x1].sum() < a0[5:10, x0:x1].sum() or a0[5:10, x0:x1].sum() == 0
+    assert np.array_equal(a1[45:55], a0[45:55])          # 真ん中は同じ

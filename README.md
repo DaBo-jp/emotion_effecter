@@ -186,6 +186,7 @@ out/<曲>/                   出力。全部作り直せるもの
   |---|---|
   | `position` | `right` / `left` / `center`（固定）、`left_right` / `right_left`（セクションごとに左右を入れ替え） |
   | `direction` | `up`（下から上）/ `down`（上から下）。`roll` だけ |
+  | `edge_fade` | `roll` の文字が画面の上下の端で薄れる幅（画面の高さに対する比）。0 で薄れない。帯は薄れない |
   | `band` / `band_alpha` | 裏の帯の色と不透明度。固定の位置は列の上から下まで、交互と `card` は文字の裏だけ |
   | `font` / `weight` | fontconfig のファミリー名か別名（`noto-sans` / `noto-serif`）かファイル。太さは Regular / Bold など |
   | `size` / `width` / `margin` / `anchor` / `gap` / `line` / `color` | 文字の高さ・列の幅・端からの余白（比）、基準の高さ、セクションの間の行数、行の送り、文字の色 |

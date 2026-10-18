@@ -34,6 +34,9 @@
 側だけに敷く——文字が入ってくるにつれて濃くなり、出ていくにつれて薄くなる
 （見えている文字が `band_fade` 行ぶんで濃さいっぱい）。`card` は文字の裏の箱。
 
+`edge_fade` を書くと、流れる文字が画面の上下の端でその幅（画面の高さに対する比）を
+かけて薄れて消える・浮かんでくる。帯は薄れない。
+
 帯は `band` の色を不透明度 `band_alpha` で敷く。文字は列の中で中央揃え、列に
 収まらない行は折り返す（空白があれば語の切れ目で、無ければ文字で）。
 
@@ -50,8 +53,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+import numpy as np
 from cymatics.model.color import parse as parse_color
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 from .lyrics import Song
 
@@ -82,6 +86,7 @@ DEFAULTS: Mapping[str, Any] = MappingProxyType({
     "direction": "up",
     "fade": 0.5,             # card の浮かぶ・消える秒数
     "band_fade": 2.0,        # 交互の縦の帯が濃くなりきるまでの、見えている文字の行数
+    "edge_fade": 0.0,        # roll の文字が上下の端で薄れる幅 ÷ 画面の高さ。0 で薄れない
     "band": "0,0,0",
     "band_alpha": 0.4,
     "color": "255,255,255",
@@ -110,7 +115,7 @@ EPS = 1e-9
 RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
     "band_alpha": (0.0, 1.0), "size": (0.005, 0.2), "width": (0.05, 1.0),
     "margin": (0.0, 0.45), "anchor": (0.0, 1.0), "gap": (0.0, 20.0), "line": (1.0, 4.0),
-    "fade": (0.0, 5.0), "band_fade": (0.0, 20.0)})
+    "fade": (0.0, 5.0), "band_fade": (0.0, 20.0), "edge_fade": (0.0, 0.5)})
 
 
 @dataclass(frozen=True)
@@ -371,12 +376,31 @@ def draw(img: Image.Image, t: float, roll: Roll, cache: dict) -> Image.Image:
     w, h = roll.size
     shown = [(b, top) for b in roll.blocks if b.lines
              for top in [_top(roll, b, t)] if top < h and top + len(b.lines) * roll.step > 0]
-    layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    _bands(roll, layer, shown)
+    bands, text = (Image.new("RGBA", (w, h), (0, 0, 0, 0)) for _ in range(2))
+    _bands(roll, bands, shown)
     for b, top in shown:
         if b not in cache:
             cache[b] = _block_image(roll, b)
-        layer.alpha_composite(cache[b], (column(roll, b.side)[0], top)) if top >= 0 else \
-            layer.alpha_composite(cache[b].crop((0, -top, cache[b].width, cache[b].height)),
-                                  (column(roll, b.side)[0], 0))
-    return Image.alpha_composite(img.convert("RGBA"), layer).convert("RGB")
+        text.alpha_composite(cache[b], (column(roll, b.side)[0], top)) if top >= 0 else \
+            text.alpha_composite(cache[b].crop((0, -top, cache[b].width, cache[b].height)),
+                                 (column(roll, b.side)[0], 0))
+    if roll.cfg["edge_fade"] > 0:
+        text.putalpha(ImageChops.multiply(text.getchannel("A"), _edges(roll, cache)))
+    out = Image.alpha_composite(img.convert("RGBA"), bands)
+    return Image.alpha_composite(out, text).convert("RGB")
+
+
+def edge_ramp(h: int, frac: float) -> np.ndarray:
+    """高さ h の濃さの倍率 0..1。上下の端から `frac × h` の間で 0 から 1 へ上がる。"""
+    y = np.arange(h) + 0.5
+    band = max(frac * h, EPS)
+    return np.clip(np.minimum(y, h - y) / band, 0.0, 1.0)
+
+
+def _edges(roll: Roll, cache: dict) -> Image.Image:
+    """上下のフェードの濃さ（画面の大きさの L）。書き出し1回ぶん作り置く。"""
+    if "edges" not in cache:
+        w, h = roll.size
+        ramp = np.rint(edge_ramp(h, roll.cfg["edge_fade"]) * OPAQUE).astype(np.uint8)
+        cache["edges"] = Image.fromarray(np.repeat(ramp[:, None], w, axis=1), "L")
+    return cache["edges"]
