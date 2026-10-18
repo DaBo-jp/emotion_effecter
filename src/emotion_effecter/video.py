@@ -95,6 +95,28 @@ def concat(parts: Sequence[str], dst: str) -> str:
     return dst
 
 
+def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: int,
+              dst: str) -> str:
+    """動画をつなぐ。つなぎ目ごとに `overlap` フレーム重ねて混ぜる（音なし）。
+
+    `frames` は各動画のフレーム数。重ねたぶん短くなる——呼ぶ側が重なりのぶん
+    長く用意する。オフセットはフレームで数えるので1フレームもずれない。
+    """
+    pre = ";".join("[%d:v]settb=AVTB,setpts=PTS-STARTPTS[v%d]" % (i, i)
+                   for i in range(len(parts)))
+    chain, cur, length = [], "[v0]", frames[0]
+    for i in range(1, len(parts)):
+        nxt = "[x%d]" % i
+        chain.append("%s[v%d]xfade=transition=fade:duration=%.6f:offset=%.6f%s"
+                     % (cur, i, overlap / fps, (length - overlap) / fps, nxt))
+        cur, length = nxt, length + frames[i] - overlap
+    inputs = [x for p in parts for x in ("-i", p)]
+    _ff(*inputs, "-filter_complex", ";".join([pre, *chain]), "-map", cur,
+        "-frames:v", str(length), "-an", "-c:v", "libx264", "-crf", "16",
+        "-pix_fmt", "yuv420p", dst)
+    return dst
+
+
 def mux(video: str, audio: str, dst: str, seconds: float) -> str:
     """音を乗せる。`-shortest` は AAC のフレーム境界で音を削るので `-t` で切る。"""
     _ff("-i", video, "-i", audio, "-map", "0:v", "-map", "1:a", "-c:v", "copy",

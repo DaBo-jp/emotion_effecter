@@ -325,7 +325,8 @@ def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
                "cheers": o["audience"] if heard else None}
     production.produce(m.effect, params, tl, out, opening=m.file("opening"),
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
-                       jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays)
+                       jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays,
+                       fade=m.clip_xfade)
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:

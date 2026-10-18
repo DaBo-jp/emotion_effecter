@@ -7,6 +7,10 @@
 本編は区間に分けて並列で描き、Opening・Closing とつないでから音を乗せ直す。
 クリップの尺は「fps に揃えたときのフレーム数」で数える（10.005秒 → 300）。
 
+`fade`（秒）を渡すと、つなぎ目をクロスフェードにする。**曲の尺も切れ目も変えない**——
+Opening の最後の `fade` 秒に本編を重ねながら入り、Closing の最初の `fade` 秒で本編から
+移る。重なるぶん本編を前後に余分に描く。0（既定）なら今までどおりの切り替え。
+
 **出力の隣に再現の記録（`<出力>.plan.json`）を置く。** cymatics の Plan と同じ
 考え方で、実際に使った Spec・Policy・切れ目・区間と、入力ファイルのハッシュが
 入る。∴ 「この動画はどの採点とどの重みで作ったか」が後から追える。
@@ -43,15 +47,26 @@ class Cut:
     total: int
     body0: int
     body1: int
+    #: つなぎ目で重ねるフレーム数。0 なら切り替え
+    fade: int = 0
+
+    def drawn(self) -> tuple[int, int]:
+        """本編として描く範囲 [f0, f1)。重ねるぶんクリップの側へはみ出す。"""
+        return (self.body0 - (self.fade if self.body0 else 0),
+                self.body1 + (self.fade if self.body1 < self.total else 0))
 
 
-def cut(audio_path: str, fps: int, opening: str | None, closing: str | None) -> Cut:
+def cut(audio_path: str, fps: int, opening: str | None, closing: str | None,
+        fade: float = 0.0) -> Cut:
     total = int(audio.duration(audio_path) * fps)
     head = video.frames_of(opening, fps) if opening else 0
     tail = video.frames_of(closing, fps) if closing else 0
     if head + tail >= total:
         raise ValueError("Opening と Closing だけで曲の尺を超える")
-    return Cut(fps, total, head, total - tail)
+    n = int(round(fade * fps))
+    if n < 0 or (opening and n > head) or (closing and n > tail):
+        raise ValueError("クロスフェード %.2f 秒が Opening / Closing より長い（か負）" % fade)
+    return Cut(fps, total, head, total - tail, n)
 
 
 def sha256(path: str) -> str:
@@ -82,6 +97,8 @@ def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chun
 def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None,
               tmp: str) -> str:
     """Opening + 本編の区間 + Closing を音なしの1本にする。"""
+    if c.fade:
+        return _blended(parts, c, opening, closing, tmp)
     if opening:
         parts = [video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps, c.body0),
                  *parts]
@@ -91,19 +108,36 @@ def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None
     return video.concat(parts, os.path.join(tmp, "video.mp4"))
 
 
+def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
+             tmp: str) -> str:
+    """つなぎ目を `c.fade` フレーム重ねて混ぜる。本編の区間は重なりのぶん長く描いてある。"""
+    f0, f1 = c.drawn()
+    clips = [(video.concat(parts, os.path.join(tmp, "body.mp4")), f1 - f0)]
+    if opening:
+        clips.insert(0, (video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps,
+                                       c.body0), c.body0))
+    if closing:
+        clips.append((video.conform(closing, os.path.join(tmp, "closing.mp4"), c.fps,
+                                    c.total - c.body1), c.total - c.body1))
+    return video.crossfade([p for p, _ in clips], [n for _, n in clips], c.fade, c.fps,
+                           os.path.join(tmp, "video.mp4"))
+
+
 def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: str, *,
             opening: str | None = None, closing: str | None = None,
             pol: Policy = Policy(), jobs: int = 0, chunk_seconds: int = CHUNK_SECONDS,
             sources: Mapping[str, str | None] | None = None,
             scenes: Scenes | None = None,
-            overlays: Sequence[Overlay] = ()) -> dict[str, Any]:
-    """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。"""
+            overlays: Sequence[Overlay] = (), fade: float = 0.0) -> dict[str, Any]:
+    """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
+    `fade` はつなぎ目のクロスフェード（秒）。"""
     pol.check()
     spec = effects.get(effect).spec_from(**{**params, "out": out})
-    c = cut(spec["audio"], int(spec["fps"]), opening, closing)
-    size = chunk_seconds * c.fps if drive.chunk_safe(effect, overlays) else c.body1 - c.body0
+    c = cut(spec["audio"], int(spec["fps"]), opening, closing, fade)
+    f0, f1 = c.drawn()
+    size = chunk_seconds * c.fps if drive.chunk_safe(effect, overlays) else f1 - f0
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
-        chunks = drive.plan_chunks(c.body0, c.body1, size, tmp)
+        chunks = drive.plan_chunks(f0, f1, size, tmp)
         parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays)
         silent = _assemble(parts, c, opening, closing, tmp)
         video.mux(silent, spec["audio"], out, c.total / c.fps)

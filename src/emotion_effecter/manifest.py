@@ -13,6 +13,8 @@
       "keys": {"Verse 1": "verse.jpg", "Chorus 1": "chorus.jpg"},
                                             ← セクションごとのキー画像。背景がその画像に
                                               切り替わり、effect もその画像に合わせて置く
+      "clip_xfade": 0.3,                    ← Opening / Closing と本編のつなぎ目の
+                                              クロスフェード（秒）。書かなければ切り替え
       "base_plain": true                    ← base.mp4 を素の cymatics にする（sections も
                                               キー画像も入れない）。書かなければ base にも
                                               振り付け（sections・置き場所・背景）が入る
@@ -46,7 +48,7 @@ from . import tempo as tempo_mod
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
-        "audience", "keys", "base_plain")
+        "audience", "keys", "base_plain", "clip_xfade")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
 AUDIENCE_KEYS = ("lead", "spread")
 
@@ -75,6 +77,8 @@ class Manifest:
     keys: Mapping[str, str] = field(default_factory=dict)
     #: base.mp4 を素の cymatics にするか（`base` の引数と `files.image` だけで描く）
     base_plain: bool = False
+    #: Opening / Closing と本編のつなぎ目のクロスフェード（秒）。0 なら切り替え
+    clip_xfade: float = 0.0
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -174,6 +178,9 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad += _files(root, doc.get("files", {}))[1]
     bad += _keys(root, doc.get("keys", {}))[1]
     bad += [] if isinstance(doc.get("base_plain", False), bool) else ["base_plain は true / false"]
+    xf = doc.get("clip_xfade", 0.0)
+    bad += [] if isinstance(xf, (int, float)) and not isinstance(xf, bool) and xf >= 0 else [
+        "clip_xfade は 0 以上の秒数"]
     try:
         effect, params = base_of(doc.get("base", {}))
         bad += _keys_problems(doc, effect, params)
@@ -211,4 +218,4 @@ def load(root: str | Path) -> Manifest:
                 tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None,
                 overlay_mod.from_list(doc.get("overlays", [])),
                 *_audience_of(doc), _keys(root, doc.get("keys", {}))[0],
-                doc.get("base_plain", False))
+                doc.get("base_plain", False), float(doc.get("clip_xfade", 0.0)))
