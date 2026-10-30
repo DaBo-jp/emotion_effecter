@@ -12,3 +12,4 @@ htmlcov/
 .env
 music_data/
 out/
+.claude/
