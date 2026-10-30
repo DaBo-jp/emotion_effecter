@@ -132,12 +132,63 @@ def test_keys_are_fields_of_cymatics():
     assert set(scenes.KEYS) <= names
 
 
+def test_reach_ends_the_alpha_curve_there():
+    """`reach` は motif の濃さのカーブに直る。r で 0、その先も 0、r=1 なら終わりで 0。"""
+    sc = scenes.build(SONG, {"Verse 1": {"reach": 0.4}, "Chorus 1": {"reach": 1}},
+                      "motif", FPS, 0.0)
+    assert sc.at(5)[0][0] == {"alpha_curve": scenes.reach_curve(0.4)}
+    pts = json.loads(scenes.reach_curve(0.4))
+    assert pts[0] == [0.0, 1.0] and pts[-2:] == [[0.4, 0.0], [1.0, 0.0]]
+    assert json.loads(scenes.reach_curve(1.0))[-1] == [1.0, 0.0]
+    from cymatics.model import curve  # カーブは cymatics の検証を通る
+    assert curve.parse(scenes.reach_curve(0.4)).at(0.6) == 0.0
+
+
+def test_bad_reach_is_listed():
+    msg = "".join(scenes.problems({"Verse 1": {"reach": 0}, "Bridge": {"reach": 1.5}}, "motif"))
+    assert "Verse 1: reach" in msg and "Bridge: reach" in msg
+    assert "alpha_curve を持たない" in "".join(scenes.problems({"V": {"reach": 0.5}}, "arc"))
+
+
+def test_moods_swing_per_section_and_hold_over_breaks():
+    """`moods` はセクションの値で lo → hi。間奏は直前のセクションの値を保つ。"""
+    doc = {"_note": "n", "density": {"by": "distance", "lo": 2.0, "hi": 0.5},
+           "reach": {"by": "distance", "lo": 1.0, "hi": 0.25}}
+    marks = [{"distance": 0.0}, None, {"distance": 1.0}]
+    assert scenes.swung(doc, marks) == [{"density": 2.0, "reach": 1.0}] * 2 + [
+        {"density": 0.5, "reach": 0.25}]
+
+
+def test_moods_go_through_density_and_reach():
+    extra = scenes.swung({"density": {"by": "distance", "lo": 2.0, "hi": 1.0}},
+                         [{"distance": 0.0}, None, {"distance": 1.0}])
+    sc = scenes.build(SONG, {}, "motif", FPS, 0.0, extra, {"rate": 5.0})
+    assert [sc.at(f)[0][0]["rate"] for f in (5, 25)] == [10.0, 5.0]
+
+
+def test_bad_moods_are_all_listed():
+    doc = {"density": {"by": "nope", "lo": 0, "hi": 1}, "shape": {"by": "love", "lo": 0, "hi": 1},
+           "glow": {"by": "love", "lo": 0, "hi": 1}, "reach": {"by": "love", "lo": 0.5},
+           "speed": {"by": "hype", "lo": "x", "hi": 1}}
+    msg = "\n".join(scenes.mood_problems(doc, "motif"))
+    for want in ("知らない軸 nope", "density.lo", "moods.shape: 動かせる", "glow は変えられない",
+                 "moods.reach: {", "知らない軸 hype", "speed.lo: 数ではない"):
+        assert want in msg, want
+
+
 # ------------------------------------------------------------ song.json
-def _manifest(tmp_path, sections):
+def test_manifest_carries_moods(tmp_path):
+    m = _manifest(tmp_path, {}, {"_n": 1, "reach": {"by": "distance", "lo": 1, "hi": 0.3}})
+    assert m.moods == {"reach": {"by": "distance", "lo": 1, "hi": 0.3}}
+    with pytest.raises(ValueError, match="moods.reach"):
+        _manifest(tmp_path, {}, {"reach": {"by": "distance", "lo": 1, "hi": 2}})
+
+
+def _manifest(tmp_path, sections, moods=None):
     for f in ("l.md", "a.wav", "i.png"):
         (tmp_path / f).write_text("x")
     doc = {"title": "T", "files": {"lyrics": "l.md", "audio": "a.wav", "image": "i.png"},
-           "base": {"effect": "motif"}, "sections": sections}
+           "base": {"effect": "motif"}, "sections": sections, **({"moods": moods} if moods else {})}
     (tmp_path / "song.json").write_text(json.dumps(doc), encoding="utf-8")
     return manifest.load(tmp_path)
 
@@ -268,6 +319,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
         keys: tuple = ()
         base_plain: bool = False
         credits: object = None
+        moods: dict = field(default_factory=dict)
 
         def file(self, role):
             return None

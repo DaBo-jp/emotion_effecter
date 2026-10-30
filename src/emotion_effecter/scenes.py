@@ -29,6 +29,17 @@ song.json に書く:
   する——手で `rate` を書くと `tempo` が拍から出した数を潰すが、倍率ならその上に
   掛かる（無ければ `base` の値に掛かる）。火花の区間だけ密にする、など
 
+- **届く割合で書ける**（`REACH`）。`"reach": 0.3` で、motif の図形は流れの3割まで
+  進んだところで消える（`alpha_curve` をそこで 0 にするカーブに書き換える。base の
+  `alpha_curve` は使わない）。Virga——地面に届く前に消える雨
+- **感情で動かせる**（song.json の `moods`、`swung()`）。セクションごとの採点の値
+  0..1 で `lo` → `hi` へ動かした値を `extra` にする。動かせるのは小数の項目と倍率と
+  届く割合。毎フレームではなく**セクションごと**——湧く数（`rate`）をその場で
+  変えると粒の通し番号がずれて全部が瞬間移動するので、境界の入れ替えに乗せる
+
+    "moods": {"density": {"by": "distance", "lo": 2.0, "hi": 0.5},
+              "reach":   {"by": "distance", "lo": 1.0, "hi": 0.3}}
+
 変えられる項目を `KEYS` の外へ広げるときは、包絡や帯域を作り直さずに描けるか
 （`stage()` と `derive()` の作り直しだけで済むか）を確かめてから足す。
 
@@ -36,6 +47,7 @@ song.json に書く:
 """
 from __future__ import annotations
 
+import json
 from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -44,6 +56,7 @@ from typing import Any
 
 from cymatics import effects
 
+from . import dims
 from .lyrics import Song
 
 #: セクションごとに変えられる項目
@@ -54,6 +67,18 @@ KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist",
 
 #: 倍率で書ける項目 → 掛ける先の項目
 SCALES: Mapping[str, str] = MappingProxyType({"density": "rate"})
+
+#: 届く割合で書ける項目と、書き換える先（motif の図形ごとの道のりに沿う濃さ）
+REACH, REACH_TARGET = "reach", "alpha_curve"
+#: 届く割合 r のカーブ: 道のり 0 で濃さ 1、r × REACH_KNEE で REACH_KNEE_ALPHA、r で 0。
+#: 中ほどまで濃く、終わりで急に薄れる——尾流雲の筋が途中でほどける見え方
+REACH_KNEE = 0.6
+REACH_KNEE_ALPHA = 0.6
+
+#: `moods` の1項目の書き方。軸は歌詞の採点の軸だけ（聴衆の hype はセクションの値を
+#: ここへ渡す道が無い）
+SWING_KEYS = ("by", "lo", "hi")
+SWING_AXES = dims.DIMS + dims.SEASONS
 
 Override = tuple[tuple[str, Any], ...]
 
@@ -106,9 +131,11 @@ def _value_problems(name: str, over: Mapping[str, Any], fields) -> list[str]:
     for k, v in _notes_dropped(over).items():
         if k in SCALES:
             bad += _scale_problems(name, k, v, fields)
+        elif k == REACH:
+            bad += _reach_problems(name, v, fields)
         elif k not in KEYS:
             bad.append("%s: %s は変えられない（%s）"
-                       % (name, k, " / ".join((*KEYS, *SCALES))))
+                       % (name, k, " / ".join((*KEYS, *SCALES, REACH))))
         elif k not in fields:
             bad.append("%s: この effect は %s を持たない" % (name, k))
         else:
@@ -140,6 +167,28 @@ def _scale_problems(name: str, k: str, v: Any, fields) -> list[str]:
     if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
         return ["%s: %s=%r は 0 より大きい数" % (name, k, v)]
     return []
+
+
+def _reach_problems(name: str, v: Any, fields) -> list[str]:
+    if REACH_TARGET not in fields:
+        return ["%s: この effect は %s を持たない（%s は %s を書き換える）"
+                % (name, REACH_TARGET, REACH, REACH_TARGET)]
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= 1:
+        return ["%s: %s=%r は 0 より大きく 1 以下" % (name, REACH, v)]
+    return []
+
+
+def reach_curve(r: float) -> str:
+    """届く割合 r → `alpha_curve` の JSON。r が 1 なら流れの終わりで 0。"""
+    pts = [[0.0, 1.0], [r * REACH_KNEE, REACH_KNEE_ALPHA], [r, 0.0]]
+    return json.dumps(pts + ([[1.0, 0.0]] if r < 1 else []))
+
+
+def _reached(over: Mapping[str, Any]) -> dict[str, Any]:
+    out = dict(over)
+    if REACH in out:
+        out[REACH_TARGET] = reach_curve(float(out.pop(REACH)))
+    return out
 
 
 def _scaled(over: Mapping[str, Any], base: Mapping[str, Any], fields) -> dict[str, Any]:
@@ -190,5 +239,53 @@ def build(song: Song, doc: Mapping[str, Any], effect: str, fps: int,
     if bad:
         raise ValueError("sections が通らない:\n  " + "\n  ".join(bad))
     return Scenes(tuple(int(round(s.start * fps)) for s in song.sections),
-                  tuple(_override(_scaled(o, base or {}, fields), fields) for o in merged),
+                  tuple(_override(_reached(_scaled(o, base or {}, fields)), fields)
+                        for o in merged),
                   int(round(xfade * fps)))
+
+
+# ------------------------------------------------------------ 感情で動かす（moods）
+def _swing_problems(key: str, sw: Any, fields) -> list[str]:
+    if not isinstance(sw, Mapping) or set(_notes_dropped(sw)) != set(SWING_KEYS):
+        return ["moods.%s: {\"by\": 軸, \"lo\": 数, \"hi\": 数} で書く" % key]
+    bad = [] if sw["by"] in SWING_AXES else [
+        "moods.%s: 知らない軸 %s（%s）" % (key, sw["by"], " / ".join(SWING_AXES))]
+    if key not in (*SCALES, REACH) and (key not in fields or fields[key].type is not float):
+        return bad + ["moods.%s: 動かせるのは小数の項目と %s"
+                      % (key, " / ".join((*SCALES, REACH)))]
+    for end in ("lo", "hi"):
+        v = sw[end]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            bad.append("moods.%s.%s: 数ではない" % (key, end))
+        else:
+            bad += _value_problems("moods.%s.%s" % (key, end), {key: v}, fields)
+    return bad
+
+
+def mood_problems(doc: Any, effect: str) -> list[str]:
+    """`moods` の駄目な理由を全部。空なら通る。"""
+    if not isinstance(doc, Mapping):
+        return ['moods は {項目: {"by": 軸, "lo": 数, "hi": 数}}']
+    fields = {f.name: f for f in effects.get(effect).fields}
+    return [p for k, sw in _notes_dropped(doc).items() for p in _swing_problems(k, sw, fields)]
+
+
+def _held(marks: Sequence[Mapping[str, float] | None]) -> list[Mapping[str, float]]:
+    """歌詞の無いセクション（None）を直前の値で埋める。先頭側は直後の値。"""
+    last = next((m for m in marks if m is not None), None)
+    if last is None:
+        raise ValueError("歌詞のあるセクションが無い")
+    out = []
+    for m in marks:
+        last = m if m is not None else last
+        out.append(last)
+    return out
+
+
+def swung(doc: Mapping[str, Any],
+          marks: Sequence[Mapping[str, float] | None]) -> list[dict[str, float]]:
+    """`moods` とセクションごとの値（`timeline.anchors`）→ `build()` の `extra`。
+    歌詞の無いセクションは直前の値を保つ——間奏で気持ちは採点されていない。"""
+    doc = _notes_dropped(doc)
+    return [{k: float(sw["lo"]) + (float(sw["hi"]) - float(sw["lo"])) * m[sw["by"]]
+             for k, sw in doc.items()} for m in _held(marks)]

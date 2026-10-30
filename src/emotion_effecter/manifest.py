@@ -23,6 +23,9 @@
                                               キー画像も入れない）。書かなければ base にも
                                               振り付け（sections・置き場所・背景）が入る
       "tempo": {"bars_calm": 8},            ← 書けば流れる速さを拍と気持ちで変える（`tempo.py`）
+      "moods": {"density": {"by": "distance", "lo": 2, "hi": 0.5}},
+                                            ← 主役の引数をセクションごとの感情で動かす
+                                              （`scenes.swung`。emotion 版だけ）
       "overlays": [{"effect": "crowd", ...}],  ← 主役の上や下に重ねる層（`overlay.py`）
       "audience": {"lead": 12.3, "spread": 2}  ← 聴衆の映像の時刻合わせと取り方（無くてもいい）
     }
@@ -53,7 +56,7 @@ from . import tempo as tempo_mod
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
-        "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits")
+        "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits", "moods")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
 AUDIENCE_KEYS = ("lead", "spread")
 
@@ -88,6 +91,8 @@ class Manifest:
     clip_transition: str = "fade"
     #: 歌詞を流すなら `credits` の中身（`roll.layout` に渡す）。None なら流さない
     credits: Mapping[str, Any] | None = None
+    #: 主役の引数 → {"by": 軸, "lo": 数, "hi": 数}。セクションごとの感情で動かす
+    moods: Mapping[str, Any] = field(default_factory=dict)
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -199,6 +204,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
         bad += _keys_problems(doc, effect, params)
         bad += ["sections: " + p for p in scenes_mod.problems(doc.get("sections", {}), effect)]
         bad += _tempo_problems(doc, effect)
+        bad += scenes_mod.mood_problems(doc.get("moods", {}), effect)
     except (ValueError, KeyError) as e:
         bad.append(str(e))
     bad += overlay_mod.problems(doc.get("overlays", []))
@@ -233,4 +239,5 @@ def load(root: str | Path) -> Manifest:
                 *_audience_of(doc), _keys(root, doc.get("keys", {}))[0],
                 doc.get("base_plain", False), float(doc.get("clip_xfade", 0.0)),
                 doc.get("clip_transition", "fade"),
-                _notes_dropped(doc["credits"]) if "credits" in doc else None)
+                _notes_dropped(doc["credits"]) if "credits" in doc else None,
+                _notes_dropped(doc.get("moods", {})))

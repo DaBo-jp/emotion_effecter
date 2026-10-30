@@ -8,9 +8,9 @@ from __future__ import annotations
 
 #: セクションごとの感情（`mood`）。値は 0..1。
 #: love は無関心 → 愛している、hate は無関心 → 憎んでいる（両方高ければ愛憎）、
-#: tense は過去 → 現在 → 未来（0.5 が現在）
+#: tense は過去 → 現在 → 未来（0.5 が現在）、distance は心の距離（溶け合う → 届かない）
 DIMS: tuple[str, ...] = ("arousal", "valence", "acceptance", "conflict", "dominance",
-                         "love", "hate", "tense")
+                         "love", "hate", "tense", "distance")
 
 #: セクションごとの季節（`mood`）。春・夏・秋・冬をそれぞれ 0..1 で。季節は巡るので
 #: 1本の軸にはしない——どの季節も感じなければ全部低く、移ろいなら2つが立つ

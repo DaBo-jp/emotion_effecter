@@ -37,7 +37,9 @@ DIMS = dims.DIMS + dims.SEASONS
 #:    主導権の移り変わりが物語の軸の曲（Architecture）で何も動かなかった
 #: 4: love（無関心 → 愛している）、hate（無関心 → 憎んでいる）、tense（過去 → 現在 → 未来）、
 #:    季節（spring / summer / autumn / winter）を足した
-FORMAT = 4
+#: 5: distance（心の距離。溶け合う → 届かない）を足した。Virga は受容が全編で高く
+#:    （0.53〜0.96）、「届かない」の深まりがどの軸にも出なかった
+FORMAT = 5
 
 _FOCUS = ("`section.text` の歌詞が表している、語り手のその時点の気持ちを判断する。"
           "`song.lyrics` は曲全体、`previous` は直前のセクションで、"
@@ -143,6 +145,18 @@ QUESTIONS: Mapping[str, Score | Choice] = MappingProxyType({
             "現在。いま目の前のこと・この瞬間を生きている",
             "未来寄り。今を語りながらも、この先を思い始めている",
             "未来。これからのこと・願い・約束を見つめている",
+        ]),
+    "distance": Score(
+        instructions=[_FOCUS,
+                      "語り手と、向き合っているもの（相手・世界・状況）との心の距離は"
+                      "どれくらいか。体が触れ合っていても心が離れていれば遠い、"
+                      "離れていても心が通っていれば近いと答える。"],
+        criteria=[
+            "溶け合っている。心が重なり、隔たりを感じていない",
+            "近い。心が通い合っていると感じている",
+            "隔たりがある。そばにいても、心の間に何かが挟まっている",
+            "遠い。手を伸ばしても届かないと感じ始めている",
+            "届かない。心はもう決して届かない、交わることがない",
         ]),
     **{s: _season(cue) for s, cue in SEASON_CUES.items()},
     "emotion": Choice(

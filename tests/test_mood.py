@@ -51,4 +51,4 @@ def test_questions_cover_every_dimension():
 
 def test_seasons_are_scored_and_selectable():
     assert set(mood.SEASON_CUES) == set(dims.SEASONS) <= set(mood.DIMS)
-    assert set(dims.SEASONS) | {"love", "hate", "tense"} <= set(dims.AXES)
+    assert set(dims.SEASONS) | {"love", "hate", "tense", "distance"} <= set(dims.AXES)

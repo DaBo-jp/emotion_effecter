@@ -329,14 +329,25 @@ def tempo_extra(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
     return extra
 
 
+def mood_extra(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
+               say: Say) -> list[dict] | None:
+    """感情から出した、セクションごとの主役の引数（`moods`）。書いていなければ None。"""
+    if not m.moods:
+        return None
+    extra = scenes.swung(m.moods, timeline.anchors(song, moods))
+    say("moods: " + " / ".join(
+        "%s %s" % (s.name, " ".join("%s %.2f" % kv for kv in e.items()))
+        for s, e in zip(song.sections, extra) if not s.instrumental))
+    return extra
+
+
 def emotion_scenes(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
                    redo: Iterable[str], say: Say, place: list[dict] | None = None
                    ) -> scenes.Scenes:
-    """emotion 版の `Scenes`。`tempo` が無ければ base と同じ。`place` は置き場所。"""
-    if m.tempo is None:
-        return build_scenes(m, song, extra=place)
-    extra = tempo_extra(m, song, moods, paces(m, o, redo, say), say)
-    return build_scenes(m, song, extra=_merge(place, extra))
+    """emotion 版の `Scenes`。`tempo` も `moods` も無ければ base と同じ。`place` は置き場所。"""
+    paced = None if m.tempo is None else tempo_extra(m, song, moods,
+                                                      paces(m, o, redo, say), say)
+    return build_scenes(m, song, extra=_merge(place, paced, mood_extra(m, song, moods, say)))
 
 
 def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
