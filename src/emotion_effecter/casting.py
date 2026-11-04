@@ -88,6 +88,11 @@ CASTS: Mapping[str, Cast] = MappingProxyType({
                   "しずくと泡。雨・涙"),
     "music": _cast("motif", {"shape": "music"}, {"light": 0.5, "wind": 0.5}, 120,
                    "音符。歌そのものが主役の曲"),
+    # 重みは仮置き（2026-11-04）
+    "cipher": _cast("cipher", {}, {"metal": 1.0, "dark": 0.5}, 130,
+                    "降る 0 と 1。機械の中・電子の語り手"),
+    "ripple": _cast("ripple", {}, {"water": 1.0, "dark": 0.2}, 70,
+                    "広がる同心円。水面に落ちる雨粒"),
 })
 
 #: 候補にしない effect と理由。**黙って外さない**（テストが全 effect を数える）

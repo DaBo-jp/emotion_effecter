@@ -441,12 +441,12 @@ arc は棒なら後光、粒なら火花。
 
 属性の合い方は「曲の平均からの偏り × 使い方の重み」、テンポは BPM が使い方の中心から
 何オクターブ離れているかの釣鐘。今の土台には `◀ 今` が付く。今の土台の順位は
-Architecture の scope が1位、イセカイの rune が2位、Shape の smoke が6位、Script の
-stave が7位——外れる曲もある。
+Architecture の scope が2位、イセカイの rune が2位、Shape の smoke が6位、Script の
+stave が8位——外れる曲もある。
 
 **正解は返さない。** 並べた候補と内訳まで出して、決めるのは人。重み（`casting.CASTS`）
 は公開済みの曲から手で置いたもので、motif の5つ（hearts / night / spring / rain /
-music）は仮置き。dB レンジは曲ごとに測るもの（cymatics の `analyze`）なので出さない。
+music）と cipher / ripple は仮置き。dB レンジは曲ごとに測るもの（cymatics の `analyze`）なので出さない。
 `genre` と絵はまだ使っていない。
 
 ### cymatics は改造しない（`drive`）
