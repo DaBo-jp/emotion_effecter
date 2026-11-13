@@ -138,14 +138,22 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
     return dst
 
 
-def fade_in(src: str, dst: str, start: float, seconds: float, frames: int) -> str:
-    """`start` 秒までは真っ黒、そこから `seconds` 秒で黒から元の絵へ（音なし）。
+def darken(src: str, dst: str, frames: int, fps: int,
+           black_in: tuple[float, float] | None = None,
+           black_out: float | None = None) -> str:
+    """黒からの入りと黒への落ち（音なし）。画面ぜんたい（絵・effect・歌詞）にかかる。
 
-    画面ぜんたい（絵・effect・歌詞）にかかる。フレーム数は変えない。
+    `black_in`＝(開始秒, 秒数)：開始秒までは真っ黒、そこから秒数で元の絵へ。
+    `black_out`＝秒数：最後のその秒数で黒へ落ち、最後のフレームが真っ黒。
+    フレーム数は変えない。
     """
-    _ff("-i", src, "-vf", "fade=t=in:st=%.6f:d=%.6f" % (start, seconds),
-        "-frames:v", str(frames), "-an", "-c:v", "libx264", "-crf", CRF,
-        "-pix_fmt", "yuv420p", dst)
+    vf = []
+    if black_in is not None:
+        vf.append("fade=t=in:st=%.6f:d=%.6f" % black_in)
+    if black_out is not None:
+        vf.append("fade=t=out:st=%.6f:d=%.6f" % (frames / fps - black_out, black_out))
+    _ff("-i", src, "-vf", ",".join(vf), "-frames:v", str(frames), "-an",
+        "-c:v", "libx264", "-crf", CRF, "-pix_fmt", "yuv420p", dst)
     return dst
 
 

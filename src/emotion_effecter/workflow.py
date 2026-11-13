@@ -369,6 +369,7 @@ def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
             jobs: int = 0, sc: scenes.Scenes | None = None, image: str | None = None,
             rl: roll.Roll | None = None,
             black: tuple[float, float] | None = None) -> None:
+    """`black` は黒からの入り（`black_of`）。黒への落ちは `m.fade_out` から。"""
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image")}
     heard = tl is not None and m.file("audience") is not None
     sources = {"lyrics": m.file("lyrics"), "mood": o["mood"] if tl else None,
@@ -379,7 +380,7 @@ def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
                        jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays,
                        fade=m.clip_xfade, transition=m.clip_transition, roll=rl,
-                       black=black)
+                       black=black, black_out=m.fade_out)
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:

@@ -86,3 +86,15 @@ def test_fade_in_problems_are_all_listed(tmp_path):
     for part in ("fade_in の知らない項目: len", "fade_in.after はセクション名",
                  "fade_in.seconds は 0 より大きい", "files.opening は一緒に使えない"):
         assert part in str(e.value), part
+
+
+def test_fade_out_is_read_and_checked(tmp_path):
+    _write(tmp_path, {**DOC, "fade_out": {"_note": "n", "seconds": 3}})
+    assert manifest.load(tmp_path).fade_out == 3.0
+    _write(tmp_path, DOC)
+    assert manifest.load(tmp_path).fade_out is None
+    _write(tmp_path, {**DOC, "fade_out": {"seconds": -1, "len": 2}})
+    with pytest.raises(ValueError) as e:
+        manifest.load(tmp_path)
+    for part in ("fade_out の知らない項目: len", "fade_out.seconds は 0 より大きい"):
+        assert part in str(e.value), part

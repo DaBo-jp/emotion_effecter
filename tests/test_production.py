@@ -139,7 +139,7 @@ def test_fade_in_is_black_until_the_start_then_rises(tmp_path):
     """開始秒までは真っ黒、そこから秒数で元の絵へ。フレーム数は変わらない。"""
     src = str(tmp_path / "w.mp4")
     _ff("-f", "lavfi", "-i", "color=c=white:size=32x18:rate=10:duration=3", src)
-    dst = video.fade_in(src, str(tmp_path / "x.mp4"), 1.0, 1.0, 30)
+    dst = video.darken(src, str(tmp_path / "x.mp4"), 30, 10, black_in=(1.0, 1.0))
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", dst, "-f", "rawvideo",
                           "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
     fr = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).astype(int)
@@ -154,4 +154,16 @@ def test_black_fade_in_keeps_the_length_and_is_recorded(tmp_path, media):
                   cache_dir=str(tmp_path))
     rec = production.produce("stave", params, None, out, closing=closing, chunk_seconds=2,
                              black=(2.0, 1.0))
-    assert rec["black"] == [2.0, 1.0] and video.count_frames(out) == 60
+    assert rec["black"] == {"in": [2.0, 1.0], "out": None} and video.count_frames(out) == 60
+
+
+def test_fade_out_falls_to_black_at_the_end(tmp_path):
+    """最後の秒数で黒へ。それより前は元の絵のまま。フレーム数は変わらない。"""
+    src = str(tmp_path / "w.mp4")
+    _ff("-f", "lavfi", "-i", "color=c=white:size=32x18:rate=10:duration=3", src)
+    dst = video.darken(src, str(tmp_path / "x.mp4"), 30, 10, black_out=1.0)
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", dst, "-f", "rawvideo",
+                          "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+    fr = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).astype(int)
+    assert len(fr) == 30
+    assert fr[15].min() > 220 and 60 < fr[25, 9, 16] < 200 and fr[29].max() < 40
