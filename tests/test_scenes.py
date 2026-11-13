@@ -310,7 +310,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
     monkeypatch.setattr(workflow, "paces", lambda *a: "paces")
     monkeypatch.setattr(workflow, "tempo_extra", lambda m, song, moods, ps, say: ps)
     monkeypatch.setattr(workflow, "produce",
-                        lambda m, out, tl, o, jobs=0, sc=None, image=None, rl=None:
+                        lambda m, out, tl, o, jobs=0, sc=None, image=None, rl=None, black=None:
                         got.update({out: (tl, sc)}))
 
     @dataclass(frozen=True)
@@ -320,6 +320,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
         base_plain: bool = False
         credits: object = None
         moods: dict = field(default_factory=dict)
+        fade_in: object = None
 
         def file(self, role):
             return None
@@ -347,3 +348,20 @@ def test_tempo_speeds_go_to_emotion_only(tmp_path, monkeypatch):
     """拍と気持ちの速さは Jev の判断 ∴ **emotion にだけ**足す。base は song.json の速さ。"""
     o, got = _run_with_fakes(tmp_path, monkeypatch, "tempo")
     assert got == {o["emotion"]: ("tl", ("sc", "paces")), o["base"]: (None, ("sc", None))}
+
+
+def test_fade_in_starts_where_the_named_section_ends():
+    """`after` の次のセクションの頭から黒が明ける。無い名前は並べて断る。"""
+    from emotion_effecter import workflow
+
+    @dataclass(frozen=True)
+    class _M:
+        fade_in: object = None
+
+        def file(self, role):
+            return None
+
+    assert workflow.black_of(_M(), SONG) is None
+    assert workflow.black_of(_M({"after": "Verse 1", "seconds": 2}), SONG) == (1.0, 2.0)
+    with pytest.raises(ValueError, match="Intro"):
+        workflow.black_of(_M({"after": "Intro", "seconds": 2}), SONG)

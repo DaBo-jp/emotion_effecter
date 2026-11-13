@@ -138,6 +138,17 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
     return dst
 
 
+def fade_in(src: str, dst: str, start: float, seconds: float, frames: int) -> str:
+    """`start` 秒までは真っ黒、そこから `seconds` 秒で黒から元の絵へ（音なし）。
+
+    画面ぜんたい（絵・effect・歌詞）にかかる。フレーム数は変えない。
+    """
+    _ff("-i", src, "-vf", "fade=t=in:st=%.6f:d=%.6f" % (start, seconds),
+        "-frames:v", str(frames), "-an", "-c:v", "libx264", "-crf", CRF,
+        "-pix_fmt", "yuv420p", dst)
+    return dst
+
+
 def mux(video: str, audio: str, dst: str, seconds: float) -> str:
     """音を乗せる。`-shortest` は AAC のフレーム境界で音を削るので `-t` で切る。"""
     _ff("-i", video, "-i", audio, "-map", "0:v", "-map", "1:a", "-c:v", "copy",

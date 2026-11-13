@@ -68,3 +68,21 @@ def test_tempo_needs_an_effect_with_speed_and_lists_every_problem(tmp_path):
     with pytest.raises(ValueError) as e:
         manifest.load(tmp_path)
     assert "speed を持たない" in str(e.value) and "bars_calm" in str(e.value)
+
+
+def test_fade_in_is_read(tmp_path):
+    _write(tmp_path, {**DOC, "fade_in": {"_note": "n", "after": "Intro", "seconds": 2}})
+    assert manifest.load(tmp_path).fade_in == {"after": "Intro", "seconds": 2}
+    _write(tmp_path, DOC)
+    assert manifest.load(tmp_path).fade_in is None
+
+
+def test_fade_in_problems_are_all_listed(tmp_path):
+    doc = {**DOC, "files": {**DOC["files"], "opening": "o.mp4"},
+           "fade_in": {"after": 3, "seconds": 0, "len": 1}}
+    _write(tmp_path, doc, files=("l.md", "a.wav", "i.png", "o.mp4"))
+    with pytest.raises(ValueError) as e:
+        manifest.load(tmp_path)
+    for part in ("fade_in の知らない項目: len", "fade_in.after はセクション名",
+                 "fade_in.seconds は 0 より大きい", "files.opening は一緒に使えない"):
+        assert part in str(e.value), part

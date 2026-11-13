@@ -19,6 +19,9 @@
                                             ← 歌詞をエンドロールのように流す（`roll.py`）
       "clip_transition": "fadewhite",       ← その切り替え方（`video.TRANSITIONS`）。
                                               書かなければ重ねて入れ替える fade
+      "fade_in": {"after": "Intro", "seconds": 2},
+                                            ← そのセクションの終わりまで真っ黒、そこから
+                                              画面ぜんたいが黒から入る（Opening の代わり）
       "base_plain": true                    ← base.mp4 を素の cymatics にする（sections も
                                               キー画像も入れない）。書かなければ base にも
                                               振り付け（sections・置き場所・背景）が入る
@@ -56,7 +59,10 @@ from . import tempo as tempo_mod
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
-        "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits", "moods")
+        "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits", "moods",
+        "fade_in")
+#: `fade_in` に書くもの。`after` のセクションが終わるまで黒、そこから `seconds` 秒で入る
+FADE_IN_KEYS = ("after", "seconds")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
 AUDIENCE_KEYS = ("lead", "spread")
 
@@ -93,6 +99,8 @@ class Manifest:
     credits: Mapping[str, Any] | None = None
     #: 主役の引数 → {"by": 軸, "lo": 数, "hi": 数}。セクションごとの感情で動かす
     moods: Mapping[str, Any] = field(default_factory=dict)
+    #: 頭の黒からのフェードイン {"after": セクション名, "seconds": 秒}。None ならしない
+    fade_in: Mapping[str, Any] | None = None
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -169,6 +177,25 @@ def _audience_problems(doc: Mapping[str, Any]) -> list[str]:
     return bad + (["audience を書いたのに files.audience が無い"] if cfg else [])
 
 
+def _fade_in_problems(doc: Mapping[str, Any]) -> list[str]:
+    """`fade_in` の書き方。Opening と一緒には使えない（どちらも頭の入り方）。"""
+    if "fade_in" not in doc:
+        return []
+    cfg = doc["fade_in"]
+    if not isinstance(cfg, Mapping):
+        return ['fade_in は {"after": セクション名, "seconds": 秒}']
+    cfg = _notes_dropped(cfg)
+    bad = ["fade_in の知らない項目: %s" % k for k in sorted(set(cfg) - set(FADE_IN_KEYS))]
+    bad += ["fade_in.%s が無い" % k for k in FADE_IN_KEYS if k not in cfg]
+    bad += [] if isinstance(cfg.get("after", ""), str) else ["fade_in.after はセクション名"]
+    sec = cfg.get("seconds", 1.0)
+    bad += [] if isinstance(sec, (int, float)) and not isinstance(sec, bool) and sec > 0 else [
+        "fade_in.seconds は 0 より大きい秒数"]
+    if "opening" in doc.get("files", {}):
+        bad.append("fade_in と files.opening は一緒に使えない（どちらも頭の入り方）")
+    return bad
+
+
 def _tempo_problems(doc: Mapping[str, Any], effect: str) -> list[str]:
     """`tempo` の駄目な理由。effect が `speed` を持たなければ速さを変えようが無い。"""
     if "tempo" not in doc:
@@ -209,6 +236,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
         bad.append(str(e))
     bad += overlay_mod.problems(doc.get("overlays", []))
     bad += _audience_problems(doc)
+    bad += _fade_in_problems(doc)
     try:
         policy_mod.from_mapping(_notes_dropped(doc.get("policy", {})))
     except ValueError as e:
@@ -240,4 +268,5 @@ def load(root: str | Path) -> Manifest:
                 doc.get("base_plain", False), float(doc.get("clip_xfade", 0.0)),
                 doc.get("clip_transition", "fade"),
                 _notes_dropped(doc["credits"]) if "credits" in doc else None,
-                _notes_dropped(doc.get("moods", {})))
+                _notes_dropped(doc.get("moods", {})),
+                _notes_dropped(doc["fade_in"]) if "fade_in" in doc else None)

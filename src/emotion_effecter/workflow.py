@@ -350,9 +350,25 @@ def emotion_scenes(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.
     return build_scenes(m, song, extra=_merge(place, paced, mood_extra(m, song, moods, say)))
 
 
+def black_of(m: Manifest, song: lyrics.Song) -> tuple[float, float] | None:
+    """`fade_in` → (黒から入り始める秒, 秒数)。`after` のセクションの次の頭から入る。"""
+    if m.fade_in is None:
+        return None
+    names = [s.name for s in song.sections]
+    after = m.fade_in["after"]
+    if after not in names:
+        raise ValueError("fade_in.after=%r が歌詞のセクションに無い（%s）"
+                         % (after, " / ".join(names)))
+    i = names.index(after)
+    end = (song.sections[i + 1].start if i + 1 < len(names)
+           else audio.duration(m.file("audio")))
+    return float(end), float(m.fade_in["seconds"])
+
+
 def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
             jobs: int = 0, sc: scenes.Scenes | None = None, image: str | None = None,
-            rl: roll.Roll | None = None) -> None:
+            rl: roll.Roll | None = None,
+            black: tuple[float, float] | None = None) -> None:
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image")}
     heard = tl is not None and m.file("audience") is not None
     sources = {"lyrics": m.file("lyrics"), "mood": o["mood"] if tl else None,
@@ -362,7 +378,8 @@ def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
     production.produce(m.effect, params, tl, out, opening=m.file("opening"),
                        closing=m.file("closing"), pol=policy.from_mapping(m.policy),
                        jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays,
-                       fade=m.clip_xfade, transition=m.clip_transition, roll=rl)
+                       fade=m.clip_xfade, transition=m.clip_transition, roll=rl,
+                       black=black)
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:
@@ -421,10 +438,12 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
     if "emotion" in steps:
         tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
         produce(m, o["emotion"], tl, o, jobs,
-                emotion_scenes(m, o, song, moods, redo, say, place), image, rl)
+                emotion_scenes(m, o, song, moods, redo, say, place), image, rl,
+                black_of(m, song))
         say("emotion: %s" % o["emotion"])
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
-        produce(m, o["base"], None, o, jobs, *base_look(m, sc, image, rl))
+        produce(m, o["base"], None, o, jobs, *base_look(m, sc, image, rl),
+                black_of(m, song))
         say("base: %s" % o["base"])
     if "compare" in steps:
         compare(m, o, say)

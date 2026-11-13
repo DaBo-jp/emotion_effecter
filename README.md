@@ -218,6 +218,11 @@ out/<曲>/                   出力。全部作り直せるもの
   切り替え方は `clip_transition` で ffmpeg の xfade の 58 種類から選べる（既定 `fade` が
   重ねて入れ替えるオーバーラップ。`fadeblack` / `fadewhite` / `dissolve` / `wipeleft` /
   `circleopen` など。一覧は `video.TRANSITIONS`）
+- `"fade_in": {"after": "Intro", "seconds": 2}` で **Opening の代わりに黒から入る**。
+  `after` のセクションが終わるまで画面は真っ黒で、次のセクションの頭から `seconds` 秒で
+  黒から明ける。画面ぜんたい（絵・effect・歌詞）にかかり、曲の尺は変わらない。
+  振り付けなので base.mp4 にも効く。`files.opening` とは一緒に使えない（Ceiling で、
+  Opening の動画がうまく作れなかったとき、歌入りの Intro のあいだを黒にした）
 - `"base_plain": true` で **base.mp4 を素の cymatics** にする（`base` の引数と
   `files.image` だけ。`sections`・キー画像・置き場所も入れない）。書かなければ base にも
   振り付けが入り、compare の上下の違いは感情だけになる
