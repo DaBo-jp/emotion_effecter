@@ -28,6 +28,31 @@ def test_neutral_look_leaves_frame_untouched():
     assert fr.levels is lv
 
 
+def test_blur_scales_glow_blur_only_when_it_moves():
+    lv = np.zeros(1, dtype=np.float32)
+    base = _Ctx((0, 0, 0), {"glow": 8.0, "glow_blur": 8.0})
+    still, _fr = drive.apply(base, _Frame(0, 0.0, lv), policy.Look((0, 0, 0), 1.0, 1.0))
+    moved, _fr = drive.apply(base, _Frame(0, 0.0, lv), policy.Look((0, 0, 0), 1.0, 1.0, blur=1.5))
+    assert still.s["glow_blur"] == 8.0 and moved.s["glow_blur"] == 12.0
+
+
+def test_section_glow_keeps_the_mood_multiplier():
+    over = {"glow": 6.0, "glow_blur": 6.0, "speed": 0.5}
+    lk = policy.Look((0, 0, 0), 1.5, 1.0, blur=0.5)
+    assert drive.looked(over, lk) == {"glow": 9.0, "glow_blur": 3.0, "speed": 0.5}
+    assert over["glow"] == 6.0
+
+
+def test_glow_alone_does_not_rebuild_the_stage():
+    class _M:
+        @staticmethod
+        def stage(_c):
+            raise AssertionError("stage を作り直した")
+
+    ctx = _Ctx((0, 0, 0), {"glow": 3.0})
+    assert drive.variant(_M, ctx, {"glow": 6.0}).s["glow"] == 6.0
+
+
 def test_gain_keeps_dtype_and_clips():
     lv = np.array([0.5, 0.95], dtype=np.float64)
     _ctx, fr = drive.apply(_Ctx((0, 0, 0)), _Frame(0, 0.0, lv), policy.Look((0, 0, 0), 1.0, 1.1))

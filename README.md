@@ -72,7 +72,8 @@ out/<曲>/                   出力。全部作り直せるもの
 - `sections` で**セクションごとに流れの向きを変えられる**（cymatics の `--flow` を持つ
   effect＝motif / smoke / rune）。書かないセクションは `base` のまま。境界は2秒かけて
   入れ替わる——古い流れは薄れながら流れ続け、新しい流れが濃くなる（粒が瞬間移動しない）。
-  変えられるのは `flow` / `flow_x` / `flow_y` / `flow_twist` と、motif の落下
+  変えられるのは `flow` / `flow_x` / `flow_y` / `flow_twist` と、にじみ `glow` /
+  `glow_blur`（感情の倍率はその上に掛かる）、motif の落下
   `gravity`（火花。経過時間の2乗で効くので、外へ散らす区間でだけ立てる——集まる・
   ゆっくり渡る区間で立てると真下へ落ちるだけになる）、図形 `shape` と向き `align`
   （星で集まり、火花で弾ける）、湧く数の倍率 `density`（`rate` を手で書くと `tempo`
@@ -407,6 +408,7 @@ Script での実測：Pre-Chorus の margin 7.19 に対して、間奏・Bridge�
 | 色（`color_by`） | acceptance | `--color` から `warm`（255,176,150）へ。**0.3 以下は動かさない** |
 | 色相の揺れ（`wobble_by`） | conflict | 最大 ±28°、周期の割り切れない2つの正弦 |
 | glow（`glow_by`） | valence | ×0.5 〜 ×1.8 |
+| glow の広がり（`blur_by`） | valence | `blur_lo` 〜 `blur_hi` 倍。既定は ×1（動かさない） |
 | バンドレベル（`gain_by`） | arousal | ×0.9 〜 ×1.1（歌詞から読んだ昂ぶりなので控えめ） |
 | 画面の灰色（`gray_by`） | valence | `gray_lo` 〜 `gray_hi`（0=今の彩度、1=グレースケール）。既定は動かさない |
 | 画面のセピア（`sepia_by`） | tense | `sepia_lo` 〜 `sepia_hi`（0=そのまま、1=セピア）。既定は動かさない |

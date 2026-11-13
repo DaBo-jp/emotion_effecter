@@ -168,10 +168,10 @@ def test_moods_go_through_density_and_reach():
 
 def test_bad_moods_are_all_listed():
     doc = {"density": {"by": "nope", "lo": 0, "hi": 1}, "shape": {"by": "love", "lo": 0, "hi": 1},
-           "glow": {"by": "love", "lo": 0, "hi": 1}, "reach": {"by": "love", "lo": 0.5},
+           "depth": {"by": "love", "lo": 0, "hi": 1}, "reach": {"by": "love", "lo": 0.5},
            "speed": {"by": "hype", "lo": "x", "hi": 1}}
     msg = "\n".join(scenes.mood_problems(doc, "motif"))
-    for want in ("知らない軸 nope", "density.lo", "moods.shape: 動かせる", "glow は変えられない",
+    for want in ("知らない軸 nope", "density.lo", "moods.shape: 動かせる", "depth は変えられない",
                  "moods.reach: {", "知らない軸 hype", "speed.lo: 数ではない"):
         assert want in msg, want
 

@@ -9,6 +9,7 @@
 | 色（`color_by`） | acceptance（受容） | `--color` → `warm`。`warm_from` 以下は動かさない |
 | 色相の揺れ（`wobble_by`） | conflict（葛藤） | 最大 ±`wobble_deg` 度 |
 | glow（`glow_by`） | valence（快） | `glow_lo` 〜 `glow_hi` 倍 |
+| glow の広がり（`blur_by`） | valence（快） | `blur_lo` 〜 `blur_hi` 倍。既定は動かさない |
 | バンドレベル（`gain_by`） | arousal（昂ぶり） | `gain_lo` 〜 `gain_hi` 倍。控えめ |
 | 画面の灰色（`gray_by`） | valence（快） | `gray_lo` 〜 `gray_hi`。0=今の彩度、1=灰色 |
 | 画面のセピア（`sepia_by`） | tense（時制） | `sepia_lo` 〜 `sepia_hi`。0 でそのまま、1 でセピア |
@@ -51,6 +52,7 @@ class Policy:
     color_by: str = "acceptance"
     wobble_by: str = "conflict"
     glow_by: str = "valence"
+    blur_by: str = "valence"
     gain_by: str = "arousal"
     gray_by: str = "valence"
     sepia_by: str = "tense"
@@ -69,6 +71,9 @@ class Policy:
     #: valence 0 / 1 での glow の倍率
     glow_lo: float = 0.5
     glow_hi: float = 1.8
+    #: blur_by 0 / 1 での glow_blur の倍率
+    blur_lo: float = 1.0
+    blur_hi: float = 1.0
     #: arousal 0 / 1 でのバンドレベルの倍率
     gain_lo: float = 0.9
     gain_hi: float = 1.1
@@ -102,7 +107,8 @@ class Policy:
 
 
 #: 次元を選ぶ項目
-BY: tuple[str, ...] = ("color_by", "wobble_by", "glow_by", "gain_by", "gray_by", "sepia_by")
+BY: tuple[str, ...] = ("color_by", "wobble_by", "glow_by", "blur_by", "gain_by", "gray_by",
+                       "sepia_by")
 
 #: 数値の項目の範囲（両端を含む）。**範囲の宣言はここだけ**
 RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
@@ -111,6 +117,8 @@ RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
     "wobble_hz": (0.0, 10.0),
     "glow_lo": (0.0, 10.0),
     "glow_hi": (0.0, 10.0),
+    "blur_lo": (0.0, 10.0),
+    "blur_hi": (0.0, 10.0),
     "gain_lo": (0.0, 4.0),
     "gain_hi": (0.0, 4.0),
     "gray_lo": (0.0, 1.0),
@@ -146,6 +154,7 @@ class Look:
     color: RGB
     glow: float      # glow に掛ける倍率
     gain: float      # バンドレベルに掛ける倍率
+    blur: float = 1.0  # glow_blur に掛ける倍率
 
 
 def _hsv(rgb: RGB) -> tuple[float, float, float]:
@@ -202,7 +211,8 @@ def look(mood: Mapping[str, float], t: float, base: RGB, pol: Policy = Policy())
     col = rotate(col, pol.wobble_deg * mood[pol.wobble_by] * swing)
     return Look(color=col,
                 glow=_lerp(pol.glow_lo, pol.glow_hi, mood[pol.glow_by]),
-                gain=_lerp(pol.gain_lo, pol.gain_hi, mood[pol.gain_by]))
+                gain=_lerp(pol.gain_lo, pol.gain_hi, mood[pol.gain_by]),
+                blur=_by(mood, pol.blur_by, pol.blur_lo, pol.blur_hi))
 
 
 def toned(pol: Policy) -> bool:

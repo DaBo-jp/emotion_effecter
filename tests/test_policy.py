@@ -34,6 +34,14 @@ def test_conflict_moves_the_hue_over_time():
     assert len(cols) > 5
 
 
+def test_blur_stays_put_by_default_and_follows_its_axis():
+    assert policy.look(CALM, 0.0, ICE).blur == 1.0
+    pol = policy.Policy(blur_by="acceptance", blur_lo=0.5, blur_hi=1.75)
+    lo = policy.look(CALM | {"acceptance": 0.0}, 0.0, ICE, pol)
+    hi = policy.look(CALM | {"acceptance": 1.0}, 0.0, ICE, pol)
+    assert (lo.blur, hi.blur) == (0.5, 1.75)
+
+
 def test_valence_and_arousal_scale_glow_and_gain():
     pol = policy.Policy()
     lo = policy.look(CALM | {"valence": 0.0, "arousal": 0.0}, 0.0, ICE, pol)

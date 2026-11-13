@@ -45,10 +45,27 @@ from .timeline import Timeline
 def apply(ctx, fr, lk: Look):
     """`Look` を cymatics の (ctx, fr) に当てる。dtype は保つ（画素が変わるため）。"""
     s = {**ctx.s, "glow": ctx.s.get("glow", 0.0) * lk.glow}
+    if lk.blur != 1.0:
+        s["glow_blur"] = ctx.s.get("glow_blur", 0.0) * lk.blur
     levels = fr.levels
     if levels.size and lk.gain != 1.0:
         levels = np.clip(levels * lk.gain, 0.0, 1.0).astype(levels.dtype)
     return replace(ctx, col=lk.color, s=s), replace(fr, levels=levels)
+
+
+#: `stage()` を作り直さなくていい項目。描くときに読むだけ
+DRAW_ONLY = frozenset({"glow", "glow_blur"})
+
+
+def looked(over: Mapping[str, Any], lk: Look) -> dict[str, Any]:
+    """セクションに書いた glow にも感情の倍率を掛ける。`variant()` は上書きなので、
+    `apply()` が `ctx` に掛けた倍率はここで消える。"""
+    out = dict(over)
+    if "glow" in out:
+        out["glow"] *= lk.glow
+    if "glow_blur" in out:
+        out["glow_blur"] *= lk.blur
+    return out
 
 
 def variant(m, ctx, over: Mapping[str, Any]):
@@ -56,6 +73,8 @@ def variant(m, ctx, over: Mapping[str, Any]):
     if not over:
         return ctx
     s = {**ctx.s, **over}
+    if DRAW_ONLY.issuperset(over):
+        return replace(ctx, s=s)
     fn = getattr(m, "derive", None)
     d = {**ctx.derived, **(fn(s, ctx.w, ctx.h, {}) if fn else {})}
     c = replace(ctx, s=s, derived=d)
@@ -129,11 +148,15 @@ def wrap(eff: effects.Effect, tl: Timeline | None, pol: Policy,
     cuts: dict = {}            # 円の箱の作り置き。この書き出しの中だけで使う
 
     def draw(img, ctx, fr):
-        if tl is not None:
-            ctx, fr = apply(ctx, fr, look(tl.frame(fr.f), fr.t, ctx.col, pol))
+        lk = None if tl is None else look(tl.frame(fr.f), fr.t, ctx.col, pol)
+        if lk is not None:
+            ctx, fr = apply(ctx, fr, lk)
         if sc is None:
             return inner.draw(img, ctx, fr)
-        return in_scenes(inner, img, ctx, fr, sc.at(fr.f), cuts)
+        parts = sc.at(fr.f)
+        if lk is not None:
+            parts = tuple((looked(over, lk), k) for over, k in parts)
+        return in_scenes(inner, img, ctx, fr, parts, cuts)
 
     mod.draw = draw
     return replace(eff, module=mod)
