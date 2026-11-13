@@ -374,6 +374,7 @@ cli         入口
 | hate | Score 5段階 | 憎しみ（無関心 → 疎ましい → 反感 → 恨む → 憎んでいる）。love と両方高ければ愛憎 |
 | tense | Score 5段階 | 時制（過去 → 過去寄り → 現在 → 未来寄り → 未来）。0.5 が現在 |
 | distance | Score 5段階 | 心の距離（溶け合う → 近い → 隔たり → 遠い → 届かない）。体が触れていても心が離れていれば遠い |
+| poignancy | Score 5段階 | 切なさ（切なくない → かすかに → 切ない → とても → 張り裂けそう）。想いと、叶わない・届かない痛みの同居。ただの悲しさとは違い、想いが無ければ切なくない |
 | spring / summer / autumn / winter | Score 4段階 ×4 | 季節をそれぞれ（感じられない → 強く感じる）。巡るので1本の軸にしない |
 | emotion | Choice | defiance / desire / doubt / fear / longing / resignation / hope / surrender |
 
