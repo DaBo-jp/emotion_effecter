@@ -153,7 +153,7 @@ def test_keys_are_resolved_and_missing_images_listed(tmp_path):
            "base": {"effect": "smoke", "params": {"beam": 0}},
            "keys": {"_note": "n", "Chorus 1": "k.jpg"}}
     assert manifest.problems({**doc, "base": {"effect": "arc"}}, tmp_path) == [
-        'keys: キー画像の背景は動画になるので明滅は使えない（base の params に "beam": 0 と書く）']
+        'keys / reel: 背景が動画になるので明滅は使えない（base の params に "beam": 0 と書く）']
     (tmp_path / "song.json").write_text(json.dumps(doc), encoding="utf-8")
     assert manifest.load(tmp_path).keys == {"Chorus 1": str((tmp_path / "k.jpg").resolve())}
     doc["keys"] = {"Verse 1": "none.jpg", "Bridge": 3}

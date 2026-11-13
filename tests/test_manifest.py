@@ -98,3 +98,20 @@ def test_fade_out_is_read_and_checked(tmp_path):
         manifest.load(tmp_path)
     for part in ("fade_out の知らない項目: len", "fade_out.seconds は 0 より大きい"):
         assert part in str(e.value), part
+
+
+def test_reel_is_read_and_refuses_what_also_decides_the_background(tmp_path):
+    rip = {**DOC, "base": {"effect": "ripple"}}   # 背景が動画なので明滅の無い effect
+    _write(tmp_path, {**rip, "reel": [{"video": "m.mp4"}, {"image": "i.png"}]},
+           files=("l.md", "a.wav", "i.png", "m.mp4"))
+    m = manifest.load(tmp_path)
+    assert [(s.kind, s.path) for s in m.reel] == [
+        ("video", str((tmp_path / "m.mp4").resolve())),
+        ("image", str((tmp_path / "i.png").resolve()))]
+    doc = {**rip, "files": {**DOC["files"], "closing": "m.mp4"}, "keys": {"Verse 1": "i.png"},
+           "reel": [{"image": "i.png"}]}
+    _write(tmp_path, doc, files=("l.md", "a.wav", "i.png", "m.mp4"))
+    with pytest.raises(ValueError) as e:
+        manifest.load(tmp_path)
+    for part in ("reel と keys は一緒に使えない", "reel と files.closing は一緒に使えない"):
+        assert part in str(e.value), part

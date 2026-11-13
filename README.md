@@ -223,6 +223,28 @@ out/<曲>/                   出力。全部作り直せるもの
   黒から明ける。画面ぜんたい（絵・effect・歌詞）にかかり、曲の尺は変わらない。
   振り付けなので base.mp4 にも効く。`files.opening` とは一緒に使えない（Ceiling で、
   Opening の動画がうまく作れなかったとき、歌入りの Intro のあいだを黒にした）
+- `reel` で**背景を区間の並びで書く**。mp4 も画像も何本でも、どの順でも並べられ、
+  **effect と歌詞は全部の上に描く**（Opening → 静止画 → Closing はその1つの書き方）。
+  区間をつないだ背景の動画（`backdrop.mp4`）を cymatics に渡す
+
+  ```json
+  "reel": [{"video": "Opening.mp4"},
+           {"image": "main.jpg", "until": "Bridge", "in": {"transition": "fade", "seconds": 1}},
+           {"video": "Bridge.mp4", "in": {"transition": "fadeblack", "seconds": 2}},
+           {"image": "main.jpg"},
+           {"video": "Closing.mp4", "in": {"transition": "fade", "seconds": 1}}]
+  ```
+
+  | 項目 | |
+  |---|---|
+  | `video` | mp4 はその尺。曲の終わりを越える最後の mp4 だけ曲の終わりで切る |
+  | `image` + `until` | 画像はセクション名（その区間が始まった後に最初に終わる、その名前のセクションの終わり。`Instrumental Break` のように何度あってもいい）か秒まで |
+  | `image`（`until` なし） | 残り全部。並びに1つだけで、後ろは mp4 だけ（尺で曲の終わりから逆に置く） |
+  | `in` | その区間の入り方。`transition`（`clip_transition` と同じ 58 種類、既定 `fade`）で `seconds` 秒。移り終えた時刻が区切りになり、入ってくる区間は `seconds` 秒早く始まる。書かなければ切り替え。最初の区間には書けない（黒から入るなら `fade_in`） |
+
+  曲の終わりに届かない並び・短すぎる区間・無いセクションは全部並べて断る（黙って伸ばさ
+  ない）。`keys` と `files.opening` / `closing` とは一緒に使えない（どれも背景か頭と
+  終わりを決める）。背景が動画になるので明滅（`beam`）は使えない
 - `"fade_out": {"seconds": 3}` で **最後のその秒数で画面ぜんたいが黒へ落ちる**（Closing が
   あれば Closing ごと）。最後のフレームが真っ黒になる。曲の尺は変わらず、base.mp4 にも効く
 - `"base_plain": true` で **base.mp4 を素の cymatics** にする（`base` の引数と

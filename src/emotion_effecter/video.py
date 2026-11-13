@@ -138,6 +138,42 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
     return dst
 
 
+def source(src: str, still: bool, fps: int, frames: int,
+           size: tuple[int, int]) -> tuple[list[str], str]:
+    """`chain` に渡す1本：(入力の引数, フィルタ)。画面 `size` を覆うように拡大して中央で
+    切り、ちょうど `frames` フレームに。動画が足りなければ最後のフレームで止める。"""
+    w, h = size
+    fit = "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1" % (w, h, w, h)
+    if still:
+        # 1回だけ縮めて、そのフレームを繰り返す（毎フレーム読み直すと14倍遅い）
+        return ["-i", src], "%s,loop=loop=%d:size=1:start=0,setpts=N/%d/TB,fps=%d" % (
+            fit, frames - 1, fps, fps)
+    return ["-i", src], "fps=%d,%s,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d" % (
+        fps, fit, frames)
+
+
+def chain(sources: Sequence[tuple[list[str], str]], frames: Sequence[int],
+          overlaps: Sequence[int], transitions: Sequence[str], fps: int, dst: str) -> str:
+    """`source` の並びを1回の書き出しでつなぐ（音なし）。つなぎ目 i ごとに `overlaps[i]`
+    フレーム重ねて `transitions[i]` で移る。0 なら切り替え。`overlaps[0]` は使わない。"""
+    pre = ";".join("[%d:v]%s,settb=AVTB,setpts=PTS-STARTPTS[v%d]" % (i, vf, i)
+                   for i, (_args, vf) in enumerate(sources))
+    links, cur, length = [], "[v0]", frames[0]
+    for i in range(1, len(sources)):
+        nxt, ov = "[x%d]" % i, overlaps[i]
+        if ov:
+            links.append("%s[v%d]xfade=transition=%s:duration=%.6f:offset=%.6f%s"
+                         % (cur, i, transitions[i], ov / fps, (length - ov) / fps, nxt))
+        else:
+            links.append("%s[v%d]concat=n=2:v=1:a=0%s" % (cur, i, nxt))
+        cur, length = nxt, length + frames[i] - ov
+    inputs = [x for args, _vf in sources for x in args]
+    _ff(*inputs, "-filter_complex", ";".join([pre, *links]), "-map", cur,
+        "-frames:v", str(length), "-an", "-c:v", "libx264", "-crf", CRF,
+        "-tune", "stillimage", "-pix_fmt", "yuv420p", "-r", str(fps), dst)
+    return dst
+
+
 def darken(src: str, dst: str, frames: int, fps: int,
            black_in: tuple[float, float] | None = None,
            black_out: float | None = None) -> str:

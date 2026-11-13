@@ -43,6 +43,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "audience": 10,       # 聴衆の映像 → Jev（区間ごとの盛り上がり）。時刻合わせは知らない
     "scenery": 10,        # キー画像 → Jev（目印の場所と、effect をどこに添えるか）
     "backdrop": 10,       # セクションごとのキー画像 → 背景の動画
+    "reel": 10,           # 背景の区間の並び（mp4 / 画像）→ 背景の動画
     "roll": 10,           # 歌詞をエンドロールのように流す
 
     # 20 — 判断を束ねる。互いに知らない

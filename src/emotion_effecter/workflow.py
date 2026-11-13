@@ -57,6 +57,7 @@ from . import (
     placement,
     policy,
     production,
+    reel,
     roll,
     scenery,
     scenes,
@@ -252,8 +253,38 @@ def placed(m: Manifest, o: Outputs, song: lyrics.Song, redo: Iterable[str],
     return [placement.params(scs[p], fields, w, h) for p in images]
 
 
+def _rewrite(o: Outputs, rec: dict) -> bool:
+    """背景の動画を作り直すか。記録（入力のハッシュ・切れ目・大きさ）が違えば作り直す。"""
+    log = Path(o["backdrop"] + ".json")
+    return not Path(o["backdrop"]).exists() or not log.exists() or \
+        json.loads(log.read_text(encoding="utf-8")) != rec
+
+
+def _logged(o: Outputs, rec: dict, say: Say) -> str:
+    Path(o["backdrop"] + ".json").write_text(json.dumps(rec, ensure_ascii=False, indent=2),
+                                             encoding="utf-8")
+    say("backdrop: %s" % o["backdrop"])
+    return o["backdrop"]
+
+
+def reel_backdrop(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
+    """`reel` の区間をつないだ背景の動画（入力が同じなら作らない）。"""
+    fps, size = fps_of(m), size_of(m)
+    dur = audio.duration(m.file("audio"))
+    spans = reel.place(m.reel, song, int(dur * fps), fps)
+    frames = math.ceil(dur * fps) + BACKDROP_TAIL * fps
+    rec = reel.record(spans, frames, fps, size)
+    if _rewrite(o, rec):
+        reel.write(o["backdrop"], spans, frames, fps, size)
+        _logged(o, rec, say)
+    return o["backdrop"]
+
+
 def backdrop_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
-    """書き出しに渡す背景。`keys` があればキー画像をつないだ動画（入力が同じなら作らない）。"""
+    """書き出しに渡す背景。`reel` があれば区間をつないだ動画、`keys` があればキー画像を
+    つないだ動画（入力が同じなら作らない）。"""
+    if m.reel:
+        return reel_backdrop(m, o, song, say)
     images = key_images(m, song)
     if images is None:
         return m.file("image")
@@ -261,12 +292,9 @@ def backdrop_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
     frames = math.ceil(audio.duration(m.file("audio")) * fps) + BACKDROP_TAIL * fps
     starts = [int(round(s.start * fps)) for s in song.sections]
     rec = backdrop.record(images, starts, frames, fps, size, int(round(XFADE * fps)))
-    log = Path(o["backdrop"] + ".json")
-    if not Path(o["backdrop"]).exists() or not log.exists() or \
-            json.loads(log.read_text(encoding="utf-8")) != rec:
+    if _rewrite(o, rec):
         backdrop.write(o["backdrop"], images, starts, frames, fps, size, rec["xfade"])
-        log.write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
-        say("backdrop: %s" % o["backdrop"])
+        _logged(o, rec, say)
     return o["backdrop"]
 
 

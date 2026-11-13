@@ -23,6 +23,9 @@
                                             ← そのセクションの終わりまで真っ黒、そこから
                                               画面ぜんたいが黒から入る（Opening の代わり）
       "fade_out": {"seconds": 3},           ← 最後のその秒数で画面ぜんたいが黒へ落ちる
+      "reel": [{"video": "a.mp4"}, {"image": "b.jpg", "until": "Bridge"}, ...],
+                                            ← 背景の区間の並び（`reel.py`）。mp4 も画像も
+                                              何本でも。effect と歌詞は全部の上に描く
       "base_plain": true                    ← base.mp4 を素の cymatics にする（sections も
                                               キー画像も入れない）。書かなければ base にも
                                               振り付け（sections・置き場所・背景）が入る
@@ -53,6 +56,7 @@ from typing import Any
 from . import dims, video
 from . import overlay as overlay_mod
 from . import policy as policy_mod
+from . import reel as reel_mod
 from . import roll as roll_mod
 from . import scenes as scenes_mod
 from . import tempo as tempo_mod
@@ -61,7 +65,7 @@ FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
         "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits", "moods",
-        "fade_in", "fade_out")
+        "fade_in", "fade_out", "reel")
 #: `fade_in` に書くもの。`after` のセクションが終わるまで黒、そこから `seconds` 秒で入る
 FADE_IN_KEYS = ("after", "seconds")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
@@ -104,6 +108,8 @@ class Manifest:
     fade_in: Mapping[str, Any] | None = None
     #: 最後に黒へ落ちる秒数。None なら落ちない
     fade_out: float | None = None
+    #: 背景の区間の並び。空なら `files.image`（と `keys`）
+    reel: tuple[reel_mod.Segment, ...] = ()
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -147,14 +153,14 @@ def _keys(root: Path, doc: Any) -> tuple[dict[str, str], list[str]]:
 
 
 def _keys_problems(doc: Mapping[str, Any], effect: str, params: Mapping[str, Any]) -> list[str]:
-    """キー画像の背景は動画になる。cymatics は動画の背景で明滅（beam）を使えない。"""
-    if not _notes_dropped(doc.get("keys", {})):
+    """キー画像と `reel` の背景は動画になる。cymatics は動画の背景で明滅（beam）を使えない。"""
+    if not _notes_dropped(doc.get("keys", {})) and "reel" not in doc:
         return []
     from cymatics import effects
 
     beam = {f.name: f.default for f in effects.get(effect).fields}.get("beam", 0)
     if float(params.get("beam", beam)) > 0:
-        return ["keys: キー画像の背景は動画になるので明滅は使えない"
+        return ["keys / reel: 背景が動画になるので明滅は使えない"
                 "（base の params に \"beam\": 0 と書く）"]
     return []
 
@@ -196,6 +202,18 @@ def _fade_in_problems(doc: Mapping[str, Any]) -> list[str]:
         "fade_in.seconds は 0 より大きい秒数"]
     if "opening" in doc.get("files", {}):
         bad.append("fade_in と files.opening は一緒に使えない（どちらも頭の入り方）")
+    return bad
+
+
+def _reel_problems(doc: Mapping[str, Any], root: Path) -> list[str]:
+    """`reel` の書き方と、背景を別に決める項目との取り合い。"""
+    if "reel" not in doc:
+        return []
+    bad = reel_mod.problems(doc["reel"], root)
+    bad += ["reel と keys は一緒に使えない（どちらも背景を決める）"] \
+        if _notes_dropped(doc.get("keys", {})) else []
+    bad += ["reel と files.%s は一緒に使えない（reel に {\"video\": ...} で並べる）" % r
+            for r in ("opening", "closing") if r in doc.get("files", {})]
     return bad
 
 
@@ -254,7 +272,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
         bad.append(str(e))
     bad += overlay_mod.problems(doc.get("overlays", []))
     bad += _audience_problems(doc)
-    bad += _fade_in_problems(doc) + _fade_out_problems(doc)
+    bad += _fade_in_problems(doc) + _fade_out_problems(doc) + _reel_problems(doc, root)
     try:
         policy_mod.from_mapping(_notes_dropped(doc.get("policy", {})))
     except ValueError as e:
@@ -288,4 +306,5 @@ def load(root: str | Path) -> Manifest:
                 _notes_dropped(doc["credits"]) if "credits" in doc else None,
                 _notes_dropped(doc.get("moods", {})),
                 _notes_dropped(doc["fade_in"]) if "fade_in" in doc else None,
-                float(doc["fade_out"]["seconds"]) if "fade_out" in doc else None)
+                float(doc["fade_out"]["seconds"]) if "fade_out" in doc else None,
+                reel_mod.from_list(doc["reel"], root) if "reel" in doc else ())

@@ -321,6 +321,7 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
         credits: object = None
         moods: dict = field(default_factory=dict)
         fade_in: object = None
+        reel: tuple = ()
 
         def file(self, role):
             return None
