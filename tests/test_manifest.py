@@ -115,3 +115,20 @@ def test_reel_is_read_and_refuses_what_also_decides_the_background(tmp_path):
         manifest.load(tmp_path)
     for part in ("reel と keys は一緒に使えない", "reel と files.closing は一緒に使えない"):
         assert part in str(e.value), part
+
+
+def test_crt_is_read_and_checked(tmp_path):
+    _write(tmp_path, {**DOC, "crt": {"_note": "n", "band_direction": "up"}})
+    c = manifest.load(tmp_path).crt
+    assert c.band_direction == "up" and c.scanlines == 0.15     # 書かない項目は既定
+    _write(tmp_path, DOC)
+    assert manifest.load(tmp_path).crt is None
+    _write(tmp_path, {**DOC, "crt": {"scanlines": 2, "pitch": 1.5, "band_height": 0,
+                                     "band_seconds": True, "band_direction": "left",
+                                     "glow": 1}})
+    with pytest.raises(ValueError) as e:
+        manifest.load(tmp_path)
+    for part in ("crt の知らない項目: glow", "crt.scanlines は 0..1", "crt.pitch は 2 以上",
+                 "crt.band_height は 0 より大きく", "crt.band_seconds は 0 より大きい",
+                 "crt.band_direction は down / up"):
+        assert part in str(e.value), part

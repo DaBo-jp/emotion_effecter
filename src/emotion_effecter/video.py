@@ -104,7 +104,8 @@ def concat(parts: Sequence[str], dst: str) -> str:
 
 
 #: つなぎ目の切り替え方（ffmpeg の xfade の transition）。`fade` が重ねて入れ替える
-#: オーバーラップ。`custom`（数式で書く）は除く
+#: オーバーラップ。`custom`（数式で書く）は除く。最後の `channel` は ffmpeg に無い、
+#: ここで式を書いた切り替え（`channel_expr`）
 TRANSITIONS: tuple[str, ...] = (
     "fade", "wipeleft", "wiperight", "wipeup", "wipedown", "slideleft", "slideright",
     "slideup", "slidedown", "circlecrop", "rectcrop", "distance", "fadeblack", "fadewhite",
@@ -114,8 +115,50 @@ TRANSITIONS: tuple[str, ...] = (
     "vdslice", "hblur", "fadegrays", "wipetl", "wipetr", "wipebl", "wipebr", "squeezeh",
     "squeezev", "zoomin", "fadefast", "fadeslow", "hlwind", "hrwind", "vuwind", "vdwind",
     "coverleft", "coverright", "coverup", "coverdown", "revealleft", "revealright",
-    "revealup", "revealdown",
+    "revealup", "revealdown", "channel",
 )
+
+
+def _rand(v: str) -> str:
+    """式 `v` → 0..1 の擬似乱数（GLSL でよく使う sin のハッシュ）。同じ入力なら同じ値。"""
+    return "((sin(%s)*43758.5453)-floor(sin(%s)*43758.5453))" % (v, v)
+
+
+def channel_expr() -> str:
+    """`channel`：ダイヤル式のブラウン管テレビでチャンネルを回したときの乱れ。xfade の
+    custom の式（yuv444p の 8bit で評価する）。
+
+    重なりの真ん中に向かって乱れが強まり、真ん中で前の映像から次の映像へ移る。
+    走査線ごとに横へ裂け（`dx`）、絵が縦に流れ（`sy`）、色が抜け、真ん中あたりは砂嵐。
+    乱れはフレームの位置だけで決まる ∴ 何度書き出しても同じ絵。
+    """
+    q = "(1-P)"                                   # 0 → 1 に進む
+    e = "sin(PI*%s)" % q                          # 乱れの強さ。両端 0、真ん中 1
+    fr = "floor(%s*24)" % q                       # 乱れの模様が変わる刻み
+    line = _rand("floor(Y/4)*12.9898+%s*78.233" % fr)
+    dx = "(%s)*W*(0.05*sin(Y*14/H+%s*40)+0.45*(%s-0.5)*gt(%s,0.4))" % (e, q, line, e)
+    sx, sy = "mod(X+%s+4*W,W)" % dx, "mod(Y+H*%s*%s*0.45+4*H,H)" % (e, e)
+
+    def src(p: int) -> str:
+        return "if(lt(%s,0.5),a%d(%s,%s),b%d(%s,%s))" % (q, p, sx, sy, p, sx, sy)
+
+    snow = _rand("X*12.9898+Y*78.233+%s*37.719" % fr)
+    s = "clip((%s-0.55)*2.2,0,0.9)" % e           # 砂嵐の濃さ
+    luma = "(%s*(1-0.35*%s*%s)*(1-%s)+%s*255*%s)" % (src(0), e, line, s, snow, s)
+    chroma = ["(128+(%s-128)*(1-%s))" % (src(p), e) for p in (1, 2)]
+    return "if(eq(PLANE,0),%s,if(eq(PLANE,1),%s,%s))" % (luma, *chroma)
+
+
+def _xfade(a: str, b: str, transition: str, frames: int, offset: int, fps: int,
+           out: str) -> str:
+    """`a` から `b` へ `frames` フレームで移る xfade（`offset` フレーム目から）。
+    `channel` は数式の切り替え（custom）。式は 8bit の 4:4:4 で書いてあるので揃えて渡す。"""
+    tail = "duration=%.6f:offset=%.6f%s" % (frames / fps, offset / fps, out)
+    if transition != "channel":
+        return "%s%sxfade=transition=%s:%s" % (a, b, transition, tail)
+    tag = out.strip("[]")
+    return ("%sformat=yuv444p[%sa];%sformat=yuv444p[%sb];[%sa][%sb]xfade=transition=custom:"
+            "expr='%s':%s" % (a, tag, b, tag, tag, tag, channel_expr(), tail))
 
 
 def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: int,
@@ -133,8 +176,7 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
     chain, cur, length = [], "[v0]", frames[0]
     for i in range(1, len(parts)):
         nxt = "[x%d]" % i
-        chain.append("%s[v%d]xfade=transition=%s:duration=%.6f:offset=%.6f%s"
-                     % (cur, i, transition, overlap / fps, (length - overlap) / fps, nxt))
+        chain.append(_xfade(cur, "[v%d]" % i, transition, overlap, length - overlap, fps, nxt))
         cur, length = nxt, length + frames[i] - overlap
     inputs = [x for p in parts for x in ("-i", p)]
     _ff(*inputs, "-filter_complex", ";".join([pre, *chain]), "-map", cur,
@@ -167,8 +209,7 @@ def chain(sources: Sequence[tuple[list[str], str]], frames: Sequence[int],
     for i in range(1, len(sources)):
         nxt, ov = "[x%d]" % i, overlaps[i]
         if ov:
-            links.append("%s[v%d]xfade=transition=%s:duration=%.6f:offset=%.6f%s"
-                         % (cur, i, transitions[i], ov / fps, (length - ov) / fps, nxt))
+            links.append(_xfade(cur, "[v%d]" % i, transitions[i], ov, length - ov, fps, nxt))
         else:
             links.append("%s[v%d]concat=n=2:v=1:a=0%s" % (cur, i, nxt))
         cur, length = nxt, length + frames[i] - ov
@@ -179,22 +220,32 @@ def chain(sources: Sequence[tuple[list[str], str]], frames: Sequence[int],
     return dst
 
 
-def darken(src: str, dst: str, frames: int, fps: int,
+def finish(src: str, dst: str, frames: int, fps: int,
            black_in: tuple[float, float] | None = None,
-           black_out: float | None = None) -> str:
-    """黒からの入りと黒への落ち（音なし）。画面ぜんたい（絵・effect・歌詞）にかかる。
+           black_out: float | None = None,
+           layers: Sequence[tuple[str, str]] = ()) -> str:
+    """つないだ1本の仕上げ（音なし）。画面ぜんたい（絵・effect・歌詞）にかかる。
 
+    `layers`＝(透過 PNG, y の式) の並び：下から順に、左端そろえで y の位置に重ねる
+    （y は overlay の式。`t` 秒・`H` 画面の高さ・`h` 重ねる絵の高さが使える）。
     `black_in`＝(開始秒, 秒数)：開始秒までは真っ黒、そこから秒数で元の絵へ。
     `black_out`＝秒数：最後のその秒数で黒へ落ち、最後のフレームが真っ黒。
-    フレーム数は変えない。
+    黒は重ねたものごと落とす。フレーム数は変えない。
     """
     vf = []
     if black_in is not None:
         vf.append("fade=t=in:st=%.6f:d=%.6f" % black_in)
     if black_out is not None:
         vf.append("fade=t=out:st=%.6f:d=%.6f" % (frames / fps - black_out, black_out))
-    _ff("-i", src, "-vf", ",".join(vf), "-frames:v", str(frames), "-an",
-        "-c:v", "libx264", "-crf", CRF, "-pix_fmt", "yuv420p", dst)
+    graph, cur = [], "[0:v]"
+    for i, (_png, y) in enumerate(layers, 1):
+        graph.append("%s[%d:v]overlay=x=0:y='%s':eval=frame[l%d]" % (cur, i, y, i))
+        cur = "[l%d]" % i
+    graph.append("%s%s[out]" % (cur, ",".join(vf) or "null"))
+    inputs = [x for png, _y in layers for x in ("-loop", "1", "-framerate", str(fps), "-i", png)]
+    _ff("-i", src, *inputs, "-filter_complex", ";".join(graph), "-map", "[out]",
+        "-frames:v", str(frames), "-an", "-c:v", "libx264", "-crf", CRF,
+        "-pix_fmt", "yuv420p", dst)
     return dst
 
 

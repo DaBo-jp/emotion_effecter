@@ -139,7 +139,7 @@ def test_fade_in_is_black_until_the_start_then_rises(tmp_path):
     """開始秒までは真っ黒、そこから秒数で元の絵へ。フレーム数は変わらない。"""
     src = str(tmp_path / "w.mp4")
     _ff("-f", "lavfi", "-i", "color=c=white:size=32x18:rate=10:duration=3", src)
-    dst = video.darken(src, str(tmp_path / "x.mp4"), 30, 10, black_in=(1.0, 1.0))
+    dst = video.finish(src, str(tmp_path / "x.mp4"), 30, 10, black_in=(1.0, 1.0))
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", dst, "-f", "rawvideo",
                           "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
     fr = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).astype(int)
@@ -161,9 +161,77 @@ def test_fade_out_falls_to_black_at_the_end(tmp_path):
     """最後の秒数で黒へ。それより前は元の絵のまま。フレーム数は変わらない。"""
     src = str(tmp_path / "w.mp4")
     _ff("-f", "lavfi", "-i", "color=c=white:size=32x18:rate=10:duration=3", src)
-    dst = video.darken(src, str(tmp_path / "x.mp4"), 30, 10, black_out=1.0)
+    dst = video.finish(src, str(tmp_path / "x.mp4"), 30, 10, black_out=1.0)
     raw = subprocess.run(["ffmpeg", "-v", "error", "-i", dst, "-f", "rawvideo",
                           "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
     fr = np.frombuffer(raw, np.uint8).reshape(-1, 18, 32).astype(int)
     assert len(fr) == 30
     assert fr[15].min() > 220 and 60 < fr[25, 9, 16] < 200 and fr[29].max() < 40
+
+
+def _gray(path, h, w):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "rawvideo",
+                          "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, h, w).astype(int)
+
+
+def test_channel_tears_snows_then_lands_on_the_next_clip(tmp_path):
+    """`channel`：真ん中で乱れが一番強く（砂嵐でざらつく）、端では前後の絵のまま。"""
+    clips = []
+    for name, c in (("a", "black"), ("b", "white")):
+        clips.append(str(tmp_path / ("%s.mp4" % name)))
+        _ff("-f", "lavfi", "-i", "color=c=%s:size=64x36:rate=10:duration=1" % c, clips[-1])
+    dst = video.crossfade(clips, [10, 10], 6, 10, str(tmp_path / "x.mp4"), "channel")
+    fr = _gray(dst, 36, 64)
+    assert len(fr) == 14
+    assert fr[3].max() < 30 and fr[-1].min() > 225               # 前後は素の黒と白
+    assert fr[7].std() > 3 * max(fr[3].std(), fr[-1].std(), 1)  # 真ん中は乱れる
+    again = _gray(video.crossfade(clips, [10, 10], 6, 10, str(tmp_path / "y.mp4"),
+                                  "channel"), 36, 64)
+    assert (again == fr).all()                                   # 何度でも同じ絵
+
+
+def test_channel_works_inside_a_chain(tmp_path):
+    srcs = []
+    for name, c in (("a", "red"), ("b", "blue")):
+        p = str(tmp_path / ("%s.mp4" % name))
+        _ff("-f", "lavfi", "-i", "color=c=%s:size=64x36:rate=10:duration=1" % c, p)
+        srcs.append(video.source(p, False, 10, 10, (64, 36)))
+    dst = video.chain(srcs, [10, 10], [0, 4], ["fade", "channel"], 10,
+                      str(tmp_path / "x.mp4"))
+    assert video.count_frames(dst) == 16
+
+
+def test_crt_draws_scanlines_and_a_band_that_moves_down(tmp_path):
+    from emotion_effecter import crt
+
+    src = str(tmp_path / "g.mp4")
+    _ff("-f", "lavfi", "-i", "color=c=gray:size=64x40:rate=10:duration=2", src)
+    c = crt.Crt(scanlines=0.5, pitch=4, band=0.6, band_height=0.25, band_seconds=2.0)
+    dst = video.finish(src, str(tmp_path / "x.mp4"), 20, 10,
+                       layers=crt.layers(c, (64, 40), str(tmp_path)))
+    fr = _gray(dst, 40, 64)
+    assert len(fr) == 20
+    rows = fr[0].mean(axis=1)
+    assert rows[2] < rows[0] - 20                                 # 縞の芯は暗い
+    band_at = [int(np.argmax(f.mean(axis=1) - rows)) for f in fr[4:16:4]]
+    assert band_at == sorted(band_at) and band_at[0] < band_at[-1]  # 上から下へ
+
+
+def test_crt_band_can_move_up():
+    from emotion_effecter import crt
+
+    assert crt.band_y(crt.Crt()) == "mod(t/8.000000,1)*(H+h)-h"
+    assert crt.band_y(crt.Crt(band_direction="up")) == "H-mod(t/8.000000,1)*(H+h)"
+
+
+def test_crt_is_recorded_and_keeps_the_length(tmp_path, media):
+    from emotion_effecter import crt
+
+    wav, img, (_opening, closing) = media
+    out = str(tmp_path / "out.mp4")
+    params = dict(audio=wav, image=img, width=128, height=72, fps=FPS, bands=8,
+                  cache_dir=str(tmp_path))
+    rec = production.produce("stave", params, None, out, closing=closing, chunk_seconds=2,
+                             crt=crt.Crt(band_direction="up"))
+    assert rec["crt"]["band_direction"] == "up" and video.count_frames(out) == 60

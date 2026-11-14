@@ -217,7 +217,10 @@ out/<曲>/                   出力。全部作り直せるもの
   最初の 0.3 秒で本編から移る（重なるぶん本編を前後に余分に描く）。書かなければ切り替え
   切り替え方は `clip_transition` で ffmpeg の xfade の 58 種類から選べる（既定 `fade` が
   重ねて入れ替えるオーバーラップ。`fadeblack` / `fadewhite` / `dissolve` / `wipeleft` /
-  `circleopen` など。一覧は `video.TRANSITIONS`）
+  `circleopen` など。一覧は `video.TRANSITIONS`）。ffmpeg に無い **`channel`** も選べる——
+  ダイヤル式のブラウン管テレビでチャンネルを回したときのように、走査線ごとに横へ裂け、
+  絵が縦に流れ、真ん中で砂嵐を挟んで次の映像へ移る。`reel` の `in.transition` でも使える。
+  数式で1画素ずつ作るので、1080p で 1 フレーム 1 秒ほどかかる（0.5 秒なら 15 秒ほど）
 - `"fade_in": {"after": "Intro", "seconds": 2}` で **Opening の代わりに黒から入る**。
   `after` のセクションが終わるまで画面は真っ黒で、次のセクションの頭から `seconds` 秒で
   黒から明ける。画面ぜんたい（絵・effect・歌詞）にかかり、曲の尺は変わらない。
@@ -247,6 +250,18 @@ out/<曲>/                   出力。全部作り直せるもの
   終わりを決める）。背景が動画になるので明滅（`beam`）は使えない
 - `"fade_out": {"seconds": 3}` で **最後のその秒数で画面ぜんたいが黒へ落ちる**（Closing が
   あれば Closing ごと）。最後のフレームが真っ黒になる。曲の尺は変わらず、base.mp4 にも効く
+- `"crt": {}` で **ブラウン管の画面**にする。うっすらした走査線と、上から下（か下から上）へ
+  繰り返し通り過ぎる明るい帯を、画面ぜんたい（Opening / Closing・歌詞も）に重ねる。
+  base.mp4 にも効く。previews.png には出ない（つないだ1本に重ねるため）
+
+  | 項目 | 意味（既定） |
+  |---|---|
+  | `scanlines` | 走査線の濃さ 0..1（0.15）。0 で引かない |
+  | `pitch` | 走査線の間隔 px（4） |
+  | `band` | 明るい帯の明るさ 0..1（0.08）。0 で流さない |
+  | `band_height` | 帯の高さ。画面の高さに対する割合（0.15） |
+  | `band_seconds` | 帯が画面を通り過ぎる秒数（8） |
+  | `band_direction` | `down`（上から下）/ `up`（下から上） |
 - `"base_plain": true` で **base.mp4 を素の cymatics** にする（`base` の引数と
   `files.image` だけ。`sections`・キー画像・置き場所も入れない）。書かなければ base にも
   振り付けが入り、compare の上下の違いは感情だけになる
@@ -339,7 +354,7 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 ```
   0  architecture / dims / lyrics / beats / video / grade / doc / digest / jev
  10  policy / mood / elements / pace / tempo / casting / structure / scenes / overlay
-     sync / windows / audience / scenery / backdrop / reel / roll
+     sync / windows / audience / scenery / backdrop / reel / roll / crt
                                   ← 互いに知らない
  20  manifest / timeline / placement
  25  livefile
@@ -390,6 +405,7 @@ backdrop    セクションごとのキー画像 → 背景の動画
 reel        背景の区間の並び（mp4 / 画像）→ 背景の動画
 roll        歌詞をエンドロール / クレジットのように流す
 grade       画面ぜんたいの色調（灰色・セピア）
+crt         ブラウン管の走査線と、上下へ流れる明るい帯
 timeline    採点 → 毎フレームの感情曲線
 policy      感情 → 見た目。**写像はここだけ**。cymatics を知らない純粋な計算
 drive       cymatics の effect の draw() を包んで動かす。区間ごとの並列書き出し

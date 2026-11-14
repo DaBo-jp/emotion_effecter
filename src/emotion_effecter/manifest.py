@@ -23,6 +23,9 @@
                                             ← そのセクションの終わりまで真っ黒、そこから
                                               画面ぜんたいが黒から入る（Opening の代わり）
       "fade_out": {"seconds": 3},           ← 最後のその秒数で画面ぜんたいが黒へ落ちる
+      "crt": {"scanlines": 0.15, "band": 0.08},
+                                            ← ブラウン管の走査線と、上下へ流れる明るい帯
+                                              （`crt.py`）。画面ぜんたいに重ねる
       "reel": [{"video": "a.mp4"}, {"image": "b.jpg", "until": "Bridge"}, ...],
                                             ← 背景の区間の並び（`reel.py`）。mp4 も画像も
                                               何本でも。effect と歌詞は全部の上に描く
@@ -53,6 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from . import crt as crt_mod
 from . import dims, video
 from . import overlay as overlay_mod
 from . import policy as policy_mod
@@ -66,7 +70,7 @@ FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
 KEYS = ("title", "genre", "files", "base", "policy", "sections", "tempo", "overlays",
         "audience", "keys", "base_plain", "clip_xfade", "clip_transition", "credits", "moods",
-        "fade_in", "fade_out", "reel")
+        "fade_in", "fade_out", "reel", "crt")
 #: `fade_in` に書くもの。`after` のセクションが終わるまで黒、そこから `seconds` 秒で入る
 FADE_IN_KEYS = ("after", "seconds")
 #: `audience` に書けるもの。`lead` は手で書いた時刻合わせ（書けば音で合わせない）
@@ -111,6 +115,8 @@ class Manifest:
     fade_out: float | None = None
     #: 背景の区間の並び。空なら `files.image`（と `keys`）
     reel: tuple[reel_mod.Segment, ...] = ()
+    #: ブラウン管の走査線と明るい帯。None なら重ねない
+    crt: crt_mod.Crt | None = None
 
     def file(self, role: str) -> str | None:
         return self.files.get(role)
@@ -270,6 +276,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad += overlay_mod.problems(doc.get("overlays", []))
     bad += _audience_problems(doc)
     bad += _fade_in_problems(doc) + _fade_out_problems(doc) + _reel_problems(doc, root)
+    bad += crt_mod.problems(doc["crt"]) if "crt" in doc else []
     try:
         policy_mod.from_mapping(notes_dropped(doc.get("policy", {})))
     except ValueError as e:
@@ -304,4 +311,5 @@ def load(root: str | Path) -> Manifest:
                 notes_dropped(doc.get("moods", {})),
                 notes_dropped(doc["fade_in"]) if "fade_in" in doc else None,
                 float(doc["fade_out"]["seconds"]) if "fade_out" in doc else None,
-                reel_mod.from_list(doc["reel"], root) if "reel" in doc else ())
+                reel_mod.from_list(doc["reel"], root) if "reel" in doc else (),
+                crt_mod.from_mapping(doc["crt"]) if "crt" in doc else None)

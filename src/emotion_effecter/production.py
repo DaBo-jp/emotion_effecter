@@ -12,6 +12,9 @@ Opening の最後の `fade` 秒に本編を重ねながら入り、Closing の�
 移る。重なるぶん本編を前後に余分に描く。0（既定）なら今までどおりの切り替え。
 切り替え方は `transition`（`video.TRANSITIONS`。既定は重ねて入れ替える `fade`）。
 
+`crt`（`crt.Crt`）を渡すと、つないだ1本の上にブラウン管の走査線と、上下へ流れる
+明るい帯を重ねる（Opening / Closing にも）。
+
 `black`（(開始秒, 秒数)）を渡すと、つないだ1本の頭を開始秒まで真っ黒にし、そこから
 秒数で黒から入る（Opening の代わり）。`black_out`（秒数）は最後のその秒数で黒へ
 落ちる。どちらも画面ぜんたい（絵・effect・歌詞、Closing も）にかかる。
@@ -33,6 +36,7 @@ from typing import Any
 from cymatics import effects
 from cymatics.dsp import audio
 
+from . import crt as crt_mod
 from . import digest, drive, video
 from .overlay import Overlay
 from .policy import Policy
@@ -128,10 +132,11 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
             overlays: Sequence[Overlay] = (), fade: float = 0.0,
             transition: str = "fade", roll: Roll | None = None,
             black: tuple[float, float] | None = None,
-            black_out: float | None = None) -> dict[str, Any]:
+            black_out: float | None = None, crt: crt_mod.Crt | None = None) -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
     `fade` はつなぎ目のクロスフェード（秒）、`transition` はその切り替え方、
-    `black` / `black_out` は黒からの入り（開始秒, 秒数）と黒への落ち（秒数）。"""
+    `black` / `black_out` は黒からの入り（開始秒, 秒数）と黒への落ち（秒数）、
+    `crt` はブラウン管の走査線と明るい帯（画面ぜんたいに重ねる）。"""
     pol.check()
     if transition not in video.TRANSITIONS:
         raise ValueError("知らない切り替え: %s" % transition)
@@ -143,9 +148,11 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
         chunks = drive.plan_chunks(f0, f1, size, tmp)
         parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays, roll)
         silent = _assemble(parts, c, opening, closing, tmp, transition)
-        if black is not None or black_out is not None:
-            silent = video.darken(silent, os.path.join(tmp, "black.mp4"), c.total, c.fps,
-                                  black, black_out)
+        lays = crt_mod.layers(crt, (int(spec["width"]), int(spec["height"])), tmp) \
+            if crt is not None else []
+        if black is not None or black_out is not None or lays:
+            silent = video.finish(silent, os.path.join(tmp, "finish.mp4"), c.total, c.fps,
+                                  black, black_out, lays)
         video.mux(silent, spec["audio"], out, c.total / c.fps)
     src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
            "closing": closing, **(sources or {})}
@@ -153,6 +160,7 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
     rec["transition"] = transition if c.fade else None
     rec["credits"] = dict(roll.cfg) if roll is not None else None
     rec["black"] = {"in": list(black) if black is not None else None, "out": black_out}
+    rec["crt"] = crt.to_dict() if crt is not None else None
     with open(out + ".plan.json", "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=2)
     return rec

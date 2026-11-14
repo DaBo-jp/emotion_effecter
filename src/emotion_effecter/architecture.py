@@ -48,6 +48,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "backdrop": 10,       # セクションごとのキー画像 → 背景の動画
     "reel": 10,           # 背景の区間の並び（mp4 / 画像）→ 背景の動画
     "roll": 10,           # 歌詞をエンドロールのように流す
+    "crt": 10,            # ブラウン管の走査線と明るい帯（重ねる絵と位置の式）
 
     # 20 — 判断を束ねる。互いに知らない
     "manifest": 20,       # song.json（曲の宣言）。policy で写像を検証する
