@@ -29,13 +29,15 @@ from typing import Any
 from . import dims
 from . import overlay as overlay_mod
 from . import policy as policy_mod
+from .doc import is_number, notes_dropped
 from .manifest import base_of
 
 KEYS = ("title", "files", "base", "overlays", "policy", "window")
 WINDOW: Mapping[str, float] = MappingProxyType({"bars": 8, "bpm": 0.0, "spread": 2.0})
 
-#: ライブ動画の写像の既定。軸は全部 `hype`（それしか無い）
-POLICY = policy_mod.Policy(color_by="hype", wobble_by="hype", glow_by="hype", gain_by="hype")
+#: ライブ動画の写像の既定。軸は**全部** `hype`（それしか無い）。`*_by` を1つでも
+#: 歌詞の軸のまま残すと、その見た目の lo / hi を書いた瞬間に描く途中で軸が引けずに落ちる
+POLICY = policy_mod.Policy(**dict.fromkeys(policy_mod.BY, "hype"))
 
 
 @dataclass(frozen=True)
@@ -55,11 +57,11 @@ class Live:
 def _window_problems(w: Any) -> list[str]:
     if not isinstance(w, Mapping):
         return ["window は {\"bars\": ..., \"bpm\": ..., \"spread\": ...}"]
-    w = overlay_mod.notes_dropped(w)
+    w = notes_dropped(w)
     bad = ["window の知らない項目: %s" % k for k in sorted(set(w) - set(WINDOW))]
     for k in set(w) & set(WINDOW):
         v = w[k]
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
+        if not is_number(v) or v < 0:
             bad.append("window.%s は 0 以上の数（%r）" % (k, v))
     if "bars" in w and (not isinstance(w["bars"], int) or w["bars"] < 1):
         bad.append("window.bars は 1 以上の整数（%r）" % w["bars"])
@@ -68,11 +70,11 @@ def _window_problems(w: Any) -> list[str]:
 
 def _axis_problems(doc: Mapping[str, Any]) -> list[str]:
     """ライブ動画には `hype` しか無い。ほかの軸を使っていたら断る。"""
-    pol = overlay_mod.notes_dropped(doc.get("policy", {}))
+    pol = notes_dropped(doc.get("policy", {}))
     bad = ["policy.%s=%s: ライブ動画で使える軸は %s だけ" % (k, v, " / ".join(dims.AUDIENCE))
            for k, v in pol.items() if k in policy_mod.BY and v not in dims.AUDIENCE]
     for i, ov in enumerate(doc.get("overlays", [])):
-        moods = overlay_mod.notes_dropped(ov.get("moods", {})) if isinstance(ov, Mapping) else {}
+        moods = notes_dropped(ov.get("moods", {})) if isinstance(ov, Mapping) else {}
         bad += ["overlays[%d].moods.%s: ライブ動画で使える軸は %s だけ"
                 % (i, k, " / ".join(dims.AUDIENCE))
                 for k, sw in moods.items()
@@ -81,7 +83,7 @@ def _axis_problems(doc: Mapping[str, Any]) -> list[str]:
 
 
 def _file_problems(root: Path, files: Any) -> list[str]:
-    if not isinstance(files, Mapping) or set(overlay_mod.notes_dropped(files)) != {"video"}:
+    if not isinstance(files, Mapping) or set(notes_dropped(files)) != {"video"}:
         return ["files は {\"video\": ライブ動画}"]
     path = root / files["video"]
     return [] if path.is_file() else ["video が無い: %s" % path.resolve()]
@@ -89,7 +91,7 @@ def _file_problems(root: Path, files: Any) -> list[str]:
 
 def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     """live.json の駄目な理由を全部。空なら通る。"""
-    doc = overlay_mod.notes_dropped(doc)
+    doc = notes_dropped(doc)
     bad = ["知らない項目: %s" % k for k in sorted(set(doc) - set(KEYS))]
     bad += ["%s が無い" % k for k in ("title", "files", "base") if k not in doc]
     bad += _file_problems(root, doc.get("files", {}))
@@ -100,7 +102,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad += overlay_mod.problems(doc.get("overlays", []))
     bad += _window_problems(doc.get("window", {})) + _axis_problems(doc)
     try:
-        policy_mod.from_mapping(overlay_mod.notes_dropped(doc.get("policy", {})), POLICY)
+        policy_mod.from_mapping(notes_dropped(doc.get("policy", {})), POLICY)
     except ValueError as e:
         bad.append("policy: " + str(e).replace("\n  ", " / "))
     return bad
@@ -113,11 +115,11 @@ def load(root: str | Path) -> Live:
     bad = problems(doc, root)
     if bad:
         raise ValueError("%s が通らない:\n  %s" % (path, "\n  ".join(bad)))
-    doc = overlay_mod.notes_dropped(doc)
+    doc = notes_dropped(doc)
     effect, params = base_of(doc["base"])
-    w = {**WINDOW, **overlay_mod.notes_dropped(doc.get("window", {}))}
+    w = {**WINDOW, **notes_dropped(doc.get("window", {}))}
     return Live(root, doc["title"], str((root / doc["files"]["video"]).resolve()), effect,
                 params, overlay_mod.from_list(doc.get("overlays", [])),
-                policy_mod.from_mapping(overlay_mod.notes_dropped(doc.get("policy", {})),
+                policy_mod.from_mapping(notes_dropped(doc.get("policy", {})),
                                         POLICY),
                 int(w["bars"]), float(w["bpm"]), float(w["spread"]))

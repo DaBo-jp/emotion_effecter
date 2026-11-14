@@ -25,13 +25,13 @@ Opening → 静止画 → Closing はその1つの書き方にすぎない。区
 """
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import video
+from . import digest, video
+from .doc import is_number, notes_dropped
 from .lyrics import Song
 
 #: 区間に書けるもの
@@ -66,20 +66,12 @@ class Span:
         return self.f0 + self.frames
 
 
-def _notes_dropped(doc: Mapping[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in doc.items() if not k.startswith("_")}
-
-
-def _number(v: Any) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-
 def _in_problems(at: str, doc: Any) -> list[str]:
     if not isinstance(doc, Mapping):
         return ['%s.in は {"transition": 切り替え, "seconds": 秒}' % at]
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     bad = ["%s.in の知らない項目: %s" % (at, k) for k in sorted(set(doc) - set(IN_KEYS))]
-    if not (_number(doc.get("seconds")) and doc["seconds"] > 0):
+    if not (is_number(doc.get("seconds")) and doc["seconds"] > 0):
         bad.append("%s.in.seconds は 0 より大きい秒数" % at)
     if doc.get("transition", "fade") not in video.TRANSITIONS:
         bad.append("%s.in.transition=%r は知らない切り替え" % (at, doc.get("transition")))
@@ -90,14 +82,14 @@ def _segment_problems(i: int, doc: Any, root: Path) -> list[str]:
     at = "reel[%d]" % i
     if not isinstance(doc, Mapping) or len({"image", "video"} & set(doc)) != 1:
         return ['%s は {"image": 画像, "until": ...} か {"video": 動画}' % at]
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     kind = "image" if "image" in doc else "video"
     keys = IMAGE_KEYS if kind == "image" else VIDEO_KEYS
     bad = ["%s の知らない項目: %s" % (at, k) for k in sorted(set(doc) - set(keys))]
     if not isinstance(doc[kind], str) or not (root / doc[kind]).is_file():
         bad.append("%s の%sが無い: %s" % (at, "画像" if kind == "image" else "動画", doc[kind]))
     until = doc.get("until")
-    if until is not None and not isinstance(until, str) and not (_number(until) and until > 0):
+    if until is not None and not isinstance(until, str) and not (is_number(until) and until > 0):
         bad.append("%s.until はセクション名か 0 より大きい秒数" % at)
     if i == 0 and "in" in doc:
         bad.append("%s.in: 最初の区間には前が無い（黒から入るなら fade_in）" % at)
@@ -123,9 +115,9 @@ def problems(doc: Any, root: Path) -> list[str]:
 def from_list(doc: Sequence[Mapping[str, Any]], root: Path) -> tuple[Segment, ...]:
     out = []
     for d in doc:
-        d = _notes_dropped(d)
+        d = notes_dropped(d)
         kind = "image" if "image" in d else "video"
-        cfg = _notes_dropped(d.get("in", {}))
+        cfg = notes_dropped(d.get("in", {}))
         out.append(Segment(kind, str((root / d[kind]).resolve()), d.get("until"),
                            cfg.get("transition", "fade"), float(cfg.get("seconds", 0.0))))
     return tuple(out)
@@ -164,7 +156,7 @@ def _backward(tail: Sequence[Segment], song_f: int, fps: int,
 
 
 def place(segs: Sequence[Segment], song: Song, song_f: int, fps: int,
-          length: Callable[[str], int] = None) -> list[Span]:
+          length: Callable[[str], int] | None = None) -> list[Span]:
     """区間を時間に置く。曲の終わり `song_f` に届かない・尺の足りない区間は全部並べて断る。"""
     length = length or (lambda p: video.frames_of(p, fps))
     rest = next((i for i, s in enumerate(segs) if s.kind == "image" and s.until is None), None)
@@ -211,7 +203,7 @@ def _checked(segs: Sequence[Segment], ends: Sequence[int | str], song_f: int,
 def record(spans: Sequence[Span], frames: int, fps: int,
            size: tuple[int, int]) -> dict[str, Any]:
     """作り直すかを決める記録。ファイルは中身のハッシュで持つ。"""
-    digest = {s.seg.path: hashlib.sha256(Path(s.seg.path).read_bytes()).hexdigest()
+    digest = {s.seg.path: digest.sha256(s.seg.path)
               for s in spans}
     return {"spans": [[s.seg.kind, s.seg.path, digest[s.seg.path], s.f0, s.frames, s.overlap,
                        s.seg.transition] for s in spans],

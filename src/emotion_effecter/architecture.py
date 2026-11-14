@@ -27,6 +27,9 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "beats": 0,           # 音源 → 拍（cymatics の decode だけ使う）
     "video": 0,           # ffmpeg
     "grade": 0,           # 画面ぜんたいの色調（灰色・セピア）
+    "doc": 0,             # 宣言と保存の JSON の決まりごと（注記・数・版）
+    "digest": 0,          # ファイルの中身のハッシュ
+    "jev": 0,             # Jev の呼び方と応答の読み方。質問は持たない
 
     # 10 — 次元や歌詞を使う判断。互いに知らない
     "policy": 10,         # 感情 → 見た目。描画を知らない

@@ -58,7 +58,8 @@ from typing import Any
 from cymatics import effects
 
 from . import dims
-from .lyrics import Song
+from .doc import SWING_KEYS, is_number, notes_dropped
+from .lyrics import Song, held
 
 #: セクションごとに変えられる項目
 KEYS: tuple[str, ...] = ("flow", "flow_x", "flow_y", "flow_twist",
@@ -79,7 +80,6 @@ REACH_KNEE_ALPHA = 0.6
 
 #: `moods` の1項目の書き方。軸は歌詞の採点の軸だけ（聴衆の hype はセクションの値を
 #: ここへ渡す道が無い）
-SWING_KEYS = ("by", "lo", "hi")
 SWING_AXES = dims.DIMS + dims.SEASONS
 
 Override = tuple[tuple[str, Any], ...]
@@ -123,14 +123,10 @@ class Scenes:
                              for f, o in zip(self.starts, self.overrides)]}
 
 
-def _notes_dropped(d: Mapping[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in d.items() if not k.startswith("_")}
-
-
 def _value_problems(name: str, over: Mapping[str, Any], fields) -> list[str]:
     """1セクションぶんの引数の駄目な理由。"""
     bad = []
-    for k, v in _notes_dropped(over).items():
+    for k, v in notes_dropped(over).items():
         if k in SCALES:
             bad += _scale_problems(name, k, v, fields)
         elif k == REACH:
@@ -154,7 +150,7 @@ def problems(doc: Mapping[str, Any], effect: str) -> list[str]:
         return ["sections は {セクション名: {項目: 値}}"]
     fields = {f.name: f for f in effects.get(effect).fields}
     bad = []
-    for name, over in _notes_dropped(doc).items():
+    for name, over in notes_dropped(doc).items():
         if not isinstance(over, Mapping):
             bad.append("%s: {項目: 値} で書く" % name)
             continue
@@ -166,7 +162,7 @@ def _scale_problems(name: str, k: str, v: Any, fields) -> list[str]:
     if SCALES[k] not in fields:
         return ["%s: この effect は %s を持たない（%s は %s の倍率）"
                 % (name, SCALES[k], k, SCALES[k])]
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+    if not is_number(v) or v <= 0:
         return ["%s: %s=%r は 0 より大きい数" % (name, k, v)]
     return []
 
@@ -175,7 +171,7 @@ def _reach_problems(name: str, v: Any, fields) -> list[str]:
     if REACH_TARGET not in fields:
         return ["%s: この effect は %s を持たない（%s は %s を書き換える）"
                 % (name, REACH_TARGET, REACH, REACH_TARGET)]
-    if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= 1:
+    if not is_number(v) or not 0 < v <= 1:
         return ["%s: %s=%r は 0 より大きく 1 以下" % (name, REACH, v)]
     return []
 
@@ -205,7 +201,7 @@ def _scaled(over: Mapping[str, Any], base: Mapping[str, Any], fields) -> dict[st
 
 
 def _override(over: Mapping[str, Any], fields) -> Override:
-    return tuple(sorted((k, fields[k].coerce(v)) for k, v in _notes_dropped(over).items()))
+    return tuple(sorted((k, fields[k].coerce(v)) for k, v in notes_dropped(over).items()))
 
 
 def _merged(song: Song, doc: Mapping[str, Any],
@@ -216,7 +212,7 @@ def _merged(song: Song, doc: Mapping[str, Any],
         raise ValueError("extra が %d 個に対してセクションが %d 個"
                          % (len(extra), len(song.sections)))
     extra = extra if extra is not None else [{}] * len(song.sections)
-    return [{**e, **_notes_dropped(doc.get(s.name, {}))}
+    return [{**e, **notes_dropped(doc.get(s.name, {}))}
             for s, e in zip(song.sections, extra)]
 
 
@@ -230,7 +226,7 @@ def build(song: Song, doc: Mapping[str, Any], effect: str, fps: int,
     """
     if not song.timed:
         raise ValueError("開始時刻の無いセクションがある（sections コマンドで推定する）")
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     names = {s.name for s in song.sections}
     merged = _merged(song, doc, extra)
     fields = {f.name: f for f in effects.get(effect).fields}
@@ -248,7 +244,7 @@ def build(song: Song, doc: Mapping[str, Any], effect: str, fps: int,
 
 # ------------------------------------------------------------ 感情で動かす（moods）
 def _swing_problems(key: str, sw: Any, fields) -> list[str]:
-    if not isinstance(sw, Mapping) or set(_notes_dropped(sw)) != set(SWING_KEYS):
+    if not isinstance(sw, Mapping) or set(notes_dropped(sw)) != set(SWING_KEYS):
         return ["moods.%s: {\"by\": 軸, \"lo\": 数, \"hi\": 数} で書く" % key]
     bad = [] if sw["by"] in SWING_AXES else [
         "moods.%s: 知らない軸 %s（%s）" % (key, sw["by"], " / ".join(SWING_AXES))]
@@ -257,7 +253,7 @@ def _swing_problems(key: str, sw: Any, fields) -> list[str]:
                       % (key, " / ".join((*SCALES, REACH)))]
     for end in ("lo", "hi"):
         v = sw[end]
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
+        if not is_number(v):
             bad.append("moods.%s.%s: 数ではない" % (key, end))
         else:
             bad += _value_problems("moods.%s.%s" % (key, end), {key: v}, fields)
@@ -269,25 +265,13 @@ def mood_problems(doc: Any, effect: str) -> list[str]:
     if not isinstance(doc, Mapping):
         return ['moods は {項目: {"by": 軸, "lo": 数, "hi": 数}}']
     fields = {f.name: f for f in effects.get(effect).fields}
-    return [p for k, sw in _notes_dropped(doc).items() for p in _swing_problems(k, sw, fields)]
-
-
-def _held(marks: Sequence[Mapping[str, float] | None]) -> list[Mapping[str, float]]:
-    """歌詞の無いセクション（None）を直前の値で埋める。先頭側は直後の値。"""
-    last = next((m for m in marks if m is not None), None)
-    if last is None:
-        raise ValueError("歌詞のあるセクションが無い")
-    out = []
-    for m in marks:
-        last = m if m is not None else last
-        out.append(last)
-    return out
+    return [p for k, sw in notes_dropped(doc).items() for p in _swing_problems(k, sw, fields)]
 
 
 def swung(doc: Mapping[str, Any],
           marks: Sequence[Mapping[str, float] | None]) -> list[dict[str, float]]:
     """`moods` とセクションごとの値（`timeline.anchors`）→ `build()` の `extra`。
     歌詞の無いセクションは直前の値を保つ——間奏で気持ちは採点されていない。"""
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     return [{k: float(sw["lo"]) + (float(sw["hi"]) - float(sw["lo"])) * m[sw["by"]]
-             for k, sw in doc.items()} for m in _held(marks)]
+             for k, sw in doc.items()} for m in held(marks)]

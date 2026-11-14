@@ -22,7 +22,6 @@ Opening の最後の `fade` 秒に本編を重ねながら入り、Closing の�
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
@@ -34,7 +33,7 @@ from typing import Any
 from cymatics import effects
 from cymatics.dsp import audio
 
-from . import drive, video
+from . import digest, drive, video
 from .overlay import Overlay
 from .policy import Policy
 from .roll import Roll
@@ -75,21 +74,13 @@ def cut(audio_path: str, fps: int, opening: str | None, closing: str | None,
     return Cut(fps, total, head, total - tail, n)
 
 
-def sha256(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chunk],
            sources: Mapping[str, str | None], mood: bool,
            sc: Scenes | None = None, ovs: Sequence[Overlay] = ()) -> dict[str, Any]:
     """再現の記録。JSON にそのまま落ちる形。"""
     return {
         "versions": {p: version(p) for p in ("emotion_effecter", "cymatics", "typesafe-sdk")},
-        "sources": {k: {"path": v, "sha256": sha256(v)} for k, v in sources.items() if v},
+        "sources": {k: {"path": v, "sha256": digest.sha256(v)} for k, v in sources.items() if v},
         "mood": mood,
         "policy": pol.to_dict(),
         "scenes": sc.to_dict() if sc is not None else None,

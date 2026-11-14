@@ -11,16 +11,14 @@ effect を選ぶ材料（`casting`）。区間ごとの感情（`mood`）と違�
 """
 from __future__ import annotations
 
-import asyncio
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from typesafe_sdk import AsyncTypeSafeClient, Score
+from typesafe_sdk import Score
 
-from . import dims
+from . import dims, doc, jev
 from .lyrics import Song
 
 #: 保存形式の版。読めない版は断る
@@ -70,27 +68,22 @@ def state(song: Song) -> dict:
 
 
 def from_response(resp) -> Elements:
-    """System One の応答 → Elements。Score は最上段で割って 0..1 にする。"""
-    scores = {e: a.score / max(a.probabilities) for e, a in resp.scores.items()}
-    return Elements(scores, {e: a.confidence for e, a in resp.scores.items()})
+    """System One の応答 → Elements。Score は最上段で割って 0..1 にする（`jev.level`）。"""
+    scores, conf, _dist = jev.scores(resp.scores)
+    return Elements(scores, conf)
 
 
 def score(song: Song) -> Elements:
     """同期版。`TYPESAFE_API_KEY` を環境変数から読む。"""
-    async def run() -> Elements:
-        async with AsyncTypeSafeClient() as client:
-            return from_response(await client.system_one(state=state(song),
-                                                         questions=questions()))
-    return asyncio.run(run())
+    async def ask(client) -> Elements:
+        return from_response(await client.system_one(state=state(song), questions=questions()))
+    return jev.run(ask)
 
 
 def save(path: str | Path, song: Song, el: Elements) -> None:
-    doc = {"format": FORMAT, "title": song.title, **asdict(el)}
-    Path(path).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    doc.write(path, {"format": FORMAT, "title": song.title, **asdict(el)})
 
 
 def load(path: str | Path) -> Elements:
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(doc, dict) or doc.get("format") != FORMAT:
-        raise ValueError("%s: 属性ファイルの形式が違う（format=%d を期待）" % (path, FORMAT))
-    return Elements(doc["scores"], doc["confidence"])
+    d = doc.read_versioned(path, FORMAT, "属性ファイル")
+    return Elements(d["scores"], d["confidence"])

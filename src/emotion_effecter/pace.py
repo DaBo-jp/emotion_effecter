@@ -11,14 +11,13 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import MappingProxyType
 
 from typesafe_sdk import AsyncTypeSafeClient, Choice
 
-from . import dims
+from . import dims, doc, jev
 from .lyrics import Song, context
 
 #: 保存形式の版。読めない版は断る
@@ -66,24 +65,18 @@ async def score_song(song: Song, client: AsyncTypeSafeClient) -> list[Pace]:
 
 def score(song: Song) -> list[Pace]:
     """同期版。`TYPESAFE_API_KEY` を環境変数から読む。"""
-    async def run() -> list[Pace]:
-        async with AsyncTypeSafeClient() as client:
-            return await score_song(song, client)
-    return asyncio.run(run())
+    return jev.run(lambda client: score_song(song, client))
 
 
 def save(path: str | Path, song: Song, paces: list[Pace]) -> None:
-    doc = {"format": FORMAT, "title": song.title, "paces": [asdict(p) for p in paces]}
-    Path(path).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    doc.write(path, {"format": FORMAT, "title": song.title,
+                     "paces": [asdict(p) for p in paces]})
 
 
 def load(path: str | Path) -> list[Pace]:
     """**知らないラベルの混じった採点も断る**（`tempo` が倍率を引けない）。"""
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(doc, dict) or doc.get("format") != FORMAT:
-        raise ValueError("%s: 気持ちの速さのファイルの形式が違う（format=%d を期待）"
-                         % (path, FORMAT))
-    paces = [Pace(**p) for p in doc["paces"]]
+    d = doc.read_versioned(path, FORMAT, "気持ちの速さのファイル")
+    paces = [Pace(**p) for p in d["paces"]]
     bad = ["%s: %s" % (p.section, k) for p in paces for k in p.probabilities
            if k not in dims.PACES]
     if bad:

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import io
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -25,7 +24,9 @@ from types import MappingProxyType
 
 from PIL import Image as PILImage
 from PIL import ImageOps
-from typesafe_sdk import AsyncTypeSafeClient, Box, Choice, Image, Noul
+from typesafe_sdk import Box, Choice, Image, Noul
+
+from . import doc, jev
 
 #: 保存形式の版。読めない版は断る
 FORMAT = 1
@@ -142,30 +143,24 @@ def look(path: str | Path, effect: str, lyrics: str) -> Scenery:
     `TYPESAFE_API_KEY` を環境変数から読む。"""
     data = prepare(path)
 
-    async def run() -> Scenery:
-        async with AsyncTypeSafeClient() as client:
-            ask = dict(model=MODEL, extra_headers=dict(HEADERS))
-            boxed, resp = await asyncio.gather(
-                client.system_one(state={"picture": Image(data)}, questions=boxes(), **ask),
-                client.system_one(state=state(data, effect, lyrics), questions=questions(),
-                                  **ask))
-            return from_response(PILImage.open(io.BytesIO(data)).size, boxed, resp)
-    return asyncio.run(run())
+    async def ask(client) -> Scenery:
+        kw = dict(model=MODEL, extra_headers=dict(HEADERS))
+        boxed, resp = await asyncio.gather(
+            client.system_one(state={"picture": Image(data)}, questions=boxes(), **kw),
+            client.system_one(state=state(data, effect, lyrics), questions=questions(), **kw))
+        return from_response(PILImage.open(io.BytesIO(data)).size, boxed, resp)
+    return jev.run(ask)
 
 
 def save(path: str | Path, key: Mapping[str, str], sc: Scenery) -> None:
     """`key` は何を聞いたか（画像のハッシュ・effect の説明・歌詞）。`load()` で照合する。"""
-    doc = {"format": FORMAT, "asked": ASKED, "key": dict(key), **asdict(sc)}
-    Path(path).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    doc.write(path, {"format": FORMAT, "asked": ASKED, "key": dict(key), **asdict(sc)})
 
 
 def load(path: str | Path, key: Mapping[str, str] | None = None) -> Scenery | None:
     """保存した採点。**聞いたものが `key` と違えば None**（採点し直す）。"""
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(doc, dict) or doc.get("format") != FORMAT:
-        raise ValueError("%s: キー画像の解析ファイルの形式が違う（format=%d を期待）"
-                         % (path, FORMAT))
-    if key is not None and (doc.get("asked") != ASKED or doc.get("key") != dict(key)):
+    d = doc.read_versioned(path, FORMAT, "キー画像の解析ファイル")
+    if key is not None and (d.get("asked") != ASKED or d.get("key") != dict(key)):
         return None
-    return Scenery(tuple(doc["size"]), {k: tuple(v) for k, v in doc["boxes"].items()},
-                   doc["box_confidence"], doc["present"], doc["anchors"])
+    return Scenery(tuple(d["size"]), {k: tuple(v) for k, v in d["boxes"].items()},
+                   d["box_confidence"], d["present"], d["anchors"])

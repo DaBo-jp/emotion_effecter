@@ -26,10 +26,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import dims
+from .doc import SWING_KEYS, is_number, notes_dropped
 
 PLACES = ("under", "over")
 KEYS = ("effect", "place", "params", "moods")
-SWING_KEYS = ("by", "lo", "hi")
 
 
 @dataclass(frozen=True)
@@ -63,11 +63,6 @@ class Overlay:
         return {"effect": self.effect, "place": self.place, "params": dict(self.params),
                 "moods": {sw.key: {"by": sw.by, "lo": sw.lo, "hi": sw.hi}
                           for sw in self.swings}}
-
-
-def notes_dropped(doc: Mapping[str, Any]) -> dict[str, Any]:
-    """`_` で始まる鍵（注記）を落とす。"""
-    return {k: v for k, v in doc.items() if not k.startswith("_")}
 
 
 def flat(params: Mapping[str, Any]) -> dict[str, Any]:
@@ -122,7 +117,7 @@ def _swing_problems(effect: str, key: str, doc: Any) -> list[str]:
         "%s: 知らない軸 %s（%s）" % (key, doc["by"], ", ".join(dims.AXES))]
     for end in ("lo", "hi"):
         v = doc[end]
-        if not isinstance(v, (int, float)) or isinstance(v, bool):
+        if not is_number(v):
             bad.append("%s.%s: 数ではない" % (key, end))
         else:
             bad += ["%s.%s: %s" % (key, end, p)

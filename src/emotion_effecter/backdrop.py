@@ -12,15 +12,14 @@
 """
 from __future__ import annotations
 
-import hashlib
 import subprocess
 from collections.abc import Mapping, Sequence
-from pathlib import Path
 from typing import Any
 
 import numpy as np
 from PIL import Image, ImageOps
 
+from . import digest
 from .lyrics import Song
 
 #: 背景の動画の画質（x264 の crf）。cymatics がこの上に描くので高めに
@@ -58,8 +57,8 @@ def weights(starts: Sequence[int], images: Sequence[str], f: int,
 def record(images: Sequence[str], starts: Sequence[int], frames: int, fps: int,
            size: tuple[int, int], xfade: int) -> dict[str, Any]:
     """作り直すかを決める記録。画像は中身のハッシュで持つ。"""
-    digest = {p: hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in set(images)}
-    return {"images": [[p, digest[p]] for p in images], "starts": list(starts),
+    sums = {p: digest.sha256(p) for p in set(images)}
+    return {"images": [[p, sums[p]] for p in images], "starts": list(starts),
             "frames": frames, "fps": fps, "size": list(size), "xfade": xfade, "crf": CRF}
 
 

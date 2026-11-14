@@ -34,6 +34,8 @@ from types import MappingProxyType
 from typing import Any
 
 from .dims import PACES
+from .doc import is_number
+from .lyrics import held
 
 #: 気持ちの速さ → 倍率の log2。名前は `dims.PACES`
 STEPS: Mapping[str, int] = MappingProxyType({"linger": -1, "walk": 0, "rush": 1})
@@ -96,7 +98,7 @@ def from_mapping(d: Mapping[str, Any]) -> Tempo:
     for k, v in d.items():
         if k not in known:
             continue
-        if isinstance(v, bool) or not isinstance(v, (int, float)):
+        if not is_number(v):
             bad.append("%s=%r は数で書く" % (k, v))
         elif k in INTS and v != int(v):
             bad.append("%s=%r は整数で書く" % (k, v))
@@ -154,18 +156,6 @@ def params(mark: Mapping[str, float], bpm: float, t: Tempo,
     return {k: v for k, v in out.items() if k in base}
 
 
-def _held(marks: Sequence[Mark]) -> list[Mapping[str, float]]:
-    """歌詞の無いセクション（None）を直前の値で埋める。先頭側は直後の値。"""
-    first = next((m for m in marks if m is not None), None)
-    if first is None:
-        raise ValueError("歌詞のあるセクションが無い")
-    out, last = [], first
-    for m in marks:
-        last = m if m is not None else last
-        out.append(last)
-    return out
-
-
 def overrides(marks: Sequence[Mark], bpm: float, t: Tempo,
               base: Mapping[str, float]) -> list[dict[str, float]]:
     """セクションごとに変える引数。`base` は effect の元の値（`params()`）。"""
@@ -173,7 +163,7 @@ def overrides(marks: Sequence[Mark], bpm: float, t: Tempo,
         raise ValueError("bpm=%r" % bpm)
     if base.get("speed", 1.0) == 0:
         raise ValueError("speed=0 の effect は速さを比べられない")
-    return [params(m, bpm, t, base) for m in _held(stretched(marks, t))]
+    return [params(m, bpm, t, base) for m in held(stretched(marks, t))]
 
 
 def summary(names: Sequence[str | None], extra: Sequence[Mapping[str, float]], bpm: float,

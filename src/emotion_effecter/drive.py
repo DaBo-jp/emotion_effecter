@@ -134,16 +134,22 @@ def in_scenes(m, img, ctx, fr, parts, cuts: dict | None = None):
         if key not in cuts:
             cuts[key] = cut_of(section_holes(ctx, over))
         c = variant(m, ctx, over)
-        img = m.draw(img, c, f) or img if cuts[key] is None else _holed(m, img, c, f, cuts[key])
+        img = (m.draw(img, c, f) or img) if cuts[key] is None else _holed(m, img, c, f, cuts[key])
     return img
+
+
+def _redrawn(eff: effects.Effect, draw) -> effects.Effect:
+    """`draw()` だけ差し替えた effect。宣言・`stage()`・導出値は元のモジュールのまま。"""
+    mod = types.ModuleType("mood_" + eff.name)
+    mod.__dict__.update({k: v for k, v in vars(eff.module).items()
+                         if not k.startswith("__")})
+    mod.draw = draw
+    return replace(eff, module=mod)
 
 
 def wrap(eff: effects.Effect, tl: Timeline | None, pol: Policy,
          sc: Scenes | None = None) -> effects.Effect:
     """`draw()` だけ包んだ effect。他の属性は元のモジュールのものをそのまま持つ。"""
-    mod = types.ModuleType("mood_" + eff.name)
-    mod.__dict__.update({k: v for k, v in vars(eff.module).items()
-                         if not k.startswith("__")})
     inner = eff.module
     cuts: dict = {}            # 円の箱の作り置き。この書き出しの中だけで使う
 
@@ -158,24 +164,19 @@ def wrap(eff: effects.Effect, tl: Timeline | None, pol: Policy,
             parts = tuple((looked(over, lk), k) for over, k in parts)
         return in_scenes(inner, img, ctx, fr, parts, cuts)
 
-    mod.draw = draw
-    return replace(eff, module=mod)
+    return _redrawn(eff, draw)
 
 
 def wrap_overlay(eff: effects.Effect, ov: Overlay, tl: Timeline | None) -> effects.Effect:
     """重ねる層の `draw()` を包む。そのフレームの感情で `moods` の項目を差し替える。"""
     if tl is None or not ov.swings:
         return eff
-    mod = types.ModuleType("mood_" + eff.name)
-    mod.__dict__.update({k: v for k, v in vars(eff.module).items()
-                         if not k.startswith("__")})
     inner = eff.module
 
     def draw(img, ctx, fr):
         return inner.draw(img, variant(inner, ctx, ov.at(tl.frame(fr.f))), fr)
 
-    mod.draw = draw
-    return replace(eff, module=mod)
+    return _redrawn(eff, draw)
 
 
 def finisher(tl: Timeline | None, pol: Policy, rl: roll_mod.Roll | None = None, fps: int = 30):

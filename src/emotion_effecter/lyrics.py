@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -74,6 +74,19 @@ def context(song: Song, i: int) -> dict:
         "previous": ({"name": prev.name, "text": prev.text} if prev
                      else "（曲の最初のセクション）"),
     }
+
+
+def held(marks: Sequence[Mapping[str, float] | None]) -> list[Mapping[str, float]]:
+    """セクションごとの値の列で、歌詞の無いセクション（None）を直前の値で埋める。
+    先頭側は直後の値。間奏で気持ちは採点されていない——変える理由が無い。"""
+    last = next((m for m in marks if m is not None), None)
+    if last is None:
+        raise ValueError("歌詞のあるセクションが無い")
+    out = []
+    for m in marks:
+        last = m if m is not None else last
+        out.append(last)
+    return out
 
 
 def parse_time(text: str) -> float:

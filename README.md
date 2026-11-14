@@ -337,16 +337,21 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 3. **同じ層の横依存は禁止。** 層は順位として宣言し、import は必ず下へ向かう
 
 ```
-  0  architecture / dims / lyrics / beats / video
- 10  policy / mood / elements / pace / tempo / casting / structure / scenes
+  0  architecture / dims / lyrics / beats / video / grade / doc / digest / jev
+ 10  policy / mood / elements / pace / tempo / casting / structure / scenes / overlay
+     sync / windows / audience / scenery / backdrop / reel / roll
                                   ← 互いに知らない
- 20  manifest / timeline
+ 20  manifest / timeline / placement
+ 25  livefile
  30  drive                        ← cymatics の描画とつなぐのはここだけ
  40  production
- 50  workflow
+ 50  workflow / liveflow          ← 互いに知らない
  60  cli / emotion_effecter
  70  __main__
 ```
+
+同じ層の2つが同じ下ごしらえを要るなら、それは下の層に置く（`doc` の注記の落とし方、
+`digest` のハッシュ、`jev` の Score の読み方、`lyrics.held` の間奏の埋め方）
 
 ほかにも cymatics から引き継いでいるもの:
 
@@ -364,22 +369,37 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 ```
 architecture  層の宣言
 dims        感情の次元の名前（採点と写像が同じ一覧を見る）
+doc         宣言と保存の JSON の決まりごと（`_` の注記・bool でない数・保存の版）
+digest      ファイルの中身のハッシュ（動画も通るので少しずつ読む）
+jev         Jev の呼び方と、Score の応答の読み方。質問は持たない
 lyrics      歌詞ファイルの読み書き
 mood        Jev でセクションごとの感情を採点。JSON に保存
-pace        Jev でセクションごとの気持ちの速さを採点（tempo のある曲だけ）
+pace        Jev でセクションごとの気持ちの速さを採点（tempo / credits.pace のある曲だけ）
 tempo       昂ぶり + 気持ちの速さ + BPM → 流れる速さ・湧く数・踊りの速さ。純粋な計算
-scenes      セクションごとに変える層の引数（流れの向き・速さ・数）
+scenes      セクションごとに変える層の引数（流れの向き・速さ・数・置き場所・moods）
+overlay     主役の上や下に重ねる層と、感情で動かす項目
 elements    Jev で曲全体の属性（水地風金火明暗）を採点
 casting     属性 + BPM → effect の候補。純粋な計算
 beats       音源 → テンポ・拍・拍ごとの音色
 structure   拍 → セクションの開始時刻（音源を知らない。合成データでテストできる）
+sync        聴衆の映像と曲の音源の時刻合わせ
+audience    聴衆の映像 → Jev（セクションごとの盛り上がり）
+scenery     キー画像 → Jev（目印の箱と、effect をどこに添えるか）
+placement   キー画像の解析 → effect の置き場所の引数
+backdrop    セクションごとのキー画像 → 背景の動画
+reel        背景の区間の並び（mp4 / 画像）→ 背景の動画
+roll        歌詞をエンドロール / クレジットのように流す
+grade       画面ぜんたいの色調（灰色・セピア）
 timeline    採点 → 毎フレームの感情曲線
 policy      感情 → 見た目。**写像はここだけ**。cymatics を知らない純粋な計算
 drive       cymatics の effect の draw() を包んで動かす。区間ごとの並列書き出し
 video       ffmpeg でつなぐ・揃える・並べる
-production  Opening / 本編 / Closing の三段
+production  本編を並列に描き、Opening / Closing とつなぎ、黒の入り・落ちと音を乗せる
 manifest    song.json（曲の宣言）を読んで検証する
 workflow    1曲を最初から最後まで
+windows     歌詞の無いライブ動画を小節で区切る
+livefile    live.json（ライブ動画1本の宣言）を読んで検証する
+liveflow    ライブ動画1本を最初から最後まで
 cli         入口
 ```
 

@@ -69,6 +69,7 @@ import numpy as np
 from cymatics.model.color import parse as parse_color
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
+from .doc import is_number, notes_dropped
 from .lyrics import Song
 
 #: 位置の名前 → 左右（交互は最初の側）
@@ -229,7 +230,7 @@ def problems(doc: Any, root: Path | None = None) -> list[str]:
     """`credits` の駄目な理由を全部。"""
     if not isinstance(doc, Mapping):
         return ["credits は {項目: 値}"]
-    doc = {k: v for k, v in doc.items() if not k.startswith("_")}
+    doc = notes_dropped(doc)
     bad = ["credits の知らない項目: %s" % k for k in sorted(set(doc) - set(DEFAULTS))]
     cfg = {**DEFAULTS, **doc}
     if cfg["position"] not in POSITIONS:
@@ -243,7 +244,7 @@ def problems(doc: Any, root: Path | None = None) -> list[str]:
                    % (cfg["direction"], " / ".join(DIRECTIONS)))
     for k, (lo, hi) in RANGES.items():
         v = cfg[k]
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
+        if not is_number(v) or not lo <= v <= hi:
             bad.append("credits.%s=%r は %s..%s の数" % (k, v, lo, hi))
     for k in ("band", "color"):
         try:
@@ -355,7 +356,7 @@ def layout(song: Song, duration: float, size: tuple[int, int], cfg: Mapping[str,
            bpm: float = 0.0) -> Roll:
     """開始時刻つきの歌詞と曲の尺から、流れる配置を作る。`cfg` は `credits`。
     `pace` のときは `paces`（セクションごとの気持ちの速さの確率、間奏は None）と BPM が要る。"""
-    cfg = {**DEFAULTS, **{k: v for k, v in cfg.items() if not k.startswith("_")}}
+    cfg = {**DEFAULTS, **notes_dropped(cfg)}
     if cfg["pace"] and (paces is None or len(paces) != len(song.sections)):
         raise ValueError("credits.pace には、セクションごとの気持ちの速さが要る")
     where = find_font(str(cfg["font"]), str(cfg["weight"]), root)
@@ -479,9 +480,12 @@ def draw(img: Image.Image, t: float, roll: Roll, cache: dict) -> Image.Image:
     for b, top in shown:
         if b not in cache:
             cache[b] = _block_image(roll, b)
-        text.alpha_composite(cache[b], (column(roll, b.side)[0], top)) if top >= 0 else \
+        x0 = column(roll, b.side)[0]
+        if top >= 0:
+            text.alpha_composite(cache[b], (x0, top))
+        else:                    # 上の端からはみ出した塊は、見えている所だけ
             text.alpha_composite(cache[b].crop((0, -top, cache[b].width, cache[b].height)),
-                                 (column(roll, b.side)[0], 0))
+                                 (x0, 0))
     edge = round(roll.edge_at(t) / EDGE_QUANT) * EDGE_QUANT
     if edge > 0:
         text.putalpha(ImageChops.multiply(text.getchannel("A"), _edges(roll, edge, cache)))

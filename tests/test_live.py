@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from emotion_effecter import audience, livefile, liveflow, timeline, windows
+from emotion_effecter import audience, livefile, liveflow, policy, timeline, windows
 
 
 # ------------------------------------------------------------------ 区切り
@@ -42,8 +42,18 @@ def _write(root, **doc):
 def test_live_json_defaults_every_axis_to_hype(tmp_path):
     _write(tmp_path)
     lv = livefile.load(tmp_path)
-    assert (lv.policy.color_by, lv.policy.glow_by, lv.policy.gain_by) == ("hype",) * 3
+    assert {getattr(lv.policy, k) for k in policy.BY} == {"hype"}
     assert (lv.bars, lv.bpm, lv.spread) == (8, 0.0, 2.0) and lv.video.endswith("Live.mp4")
+
+
+def test_live_policy_that_moves_blur_gray_sepia_reads_only_hype(tmp_path):
+    """glow の広がり・灰色・セピアを動かしても、曲線に無い歌詞の軸を引きに行かない。
+    以前は検証を通ったあと、描く途中で KeyError: 'valence' / 'tense' で落ちた。"""
+    _write(tmp_path, policy={"blur_hi": 2.0, "gray_hi": 0.5, "sepia_lo": 0.4})
+    pol = livefile.load(tmp_path).policy
+    lk = policy.look({"hype": 0.5}, 0.0, (255, 255, 255), pol)
+    assert lk.blur == pytest.approx(1.5)
+    assert policy.tone({"hype": 0.5}, pol) == pytest.approx((0.25, 0.2))
 
 
 def test_live_json_lists_every_problem(tmp_path):

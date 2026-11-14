@@ -16,7 +16,6 @@ confidence が 15〜65% まで落ちた。
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -24,7 +23,7 @@ from types import MappingProxyType
 
 from typesafe_sdk import AsyncTypeSafeClient, Choice, Score
 
-from . import dims
+from . import dims, doc, jev
 from .lyrics import Song, context
 
 #: Score で取る次元（宣言は `dims`）。値は 0..1 に正規化して持つ
@@ -210,12 +209,8 @@ def state(song: Song, i: int) -> dict:
 
 
 def from_response(section: str, resp) -> Mood:
-    """System One の応答 → Mood。Score は最上段で割って 0..1 にする。"""
-    scores, conf, dist = {}, {}, {}
-    for name, a in resp.scores.items():
-        scores[name] = a.score / max(a.probabilities)
-        conf[name] = a.confidence
-        dist[name] = {str(k): v for k, v in a.probabilities.items()}
+    """System One の応答 → Mood。Score は最上段で割って 0..1 にする（`jev.level`）。"""
+    scores, conf, dist = jev.scores(resp.scores)
     emo = resp.choices["emotion"]
     conf["emotion"], dist["emotion"] = emo.confidence, dict(emo.probabilities)
     return Mood(section, scores, conf, dist, emo.choice)
@@ -231,19 +226,13 @@ async def score_song(song: Song, client: AsyncTypeSafeClient) -> list[Mood]:
 
 def score(song: Song) -> list[Mood]:
     """同期版。`TYPESAFE_API_KEY` を環境変数から読む。"""
-    async def run() -> list[Mood]:
-        async with AsyncTypeSafeClient() as client:
-            return await score_song(song, client)
-    return asyncio.run(run())
+    return jev.run(lambda client: score_song(song, client))
 
 
 def save(path: str | Path, song: Song, moods: list[Mood]) -> None:
-    doc = {"format": FORMAT, "title": song.title, "moods": [asdict(m) for m in moods]}
-    Path(path).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    doc.write(path, {"format": FORMAT, "title": song.title,
+                     "moods": [asdict(m) for m in moods]})
 
 
 def load(path: str | Path) -> list[Mood]:
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(doc, dict) or doc.get("format") != FORMAT:
-        raise ValueError("%s: 採点ファイルの形式が違う（format=%d を期待）" % (path, FORMAT))
-    return [Mood(**m) for m in doc["moods"]]
+    return [Mood(**m) for m in doc.read_versioned(path, FORMAT, "採点ファイル")["moods"]]

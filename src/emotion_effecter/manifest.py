@@ -60,6 +60,7 @@ from . import reel as reel_mod
 from . import roll as roll_mod
 from . import scenes as scenes_mod
 from . import tempo as tempo_mod
+from .doc import notes_dropped
 
 FILES_REQUIRED = ("lyrics", "audio", "image")
 FILES_OPTIONAL = ("opening", "closing", "published", "audience")
@@ -115,15 +116,11 @@ class Manifest:
         return self.files.get(role)
 
 
-def _notes_dropped(doc: Mapping[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in doc.items() if not k.startswith("_")}
-
-
 def base_of(doc: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     """`{"preset": ...}` か `{"effect": ..., "params": {...}}` → (effect, 引数)。"""
     from cymatics import presets
 
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     if set(doc) == {"preset"}:
         return presets.get(doc["preset"])
     if "effect" in doc and set(doc) <= {"effect", "params"}:
@@ -145,7 +142,7 @@ def _keys(root: Path, doc: Any) -> tuple[dict[str, str], list[str]]:
     """`keys`（セクション名 → キー画像）。書き方の駄目と、無いファイルを全部。"""
     if not isinstance(doc, Mapping):
         return {}, ["keys は {セクション名: 画像のファイル名}"]
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     bad = ["keys.%s は画像のファイル名" % k for k, v in doc.items() if not isinstance(v, str)]
     out = {k: str((root / v).resolve()) for k, v in doc.items() if isinstance(v, str)}
     bad += ["keys.%s の画像が無い: %s" % (k, p) for k, p in out.items() if not Path(p).is_file()]
@@ -154,7 +151,7 @@ def _keys(root: Path, doc: Any) -> tuple[dict[str, str], list[str]]:
 
 def _keys_problems(doc: Mapping[str, Any], effect: str, params: Mapping[str, Any]) -> list[str]:
     """キー画像と `reel` の背景は動画になる。cymatics は動画の背景で明滅（beam）を使えない。"""
-    if not _notes_dropped(doc.get("keys", {})) and "reel" not in doc:
+    if not notes_dropped(doc.get("keys", {})) and "reel" not in doc:
         return []
     from cymatics import effects
 
@@ -167,7 +164,7 @@ def _keys_problems(doc: Mapping[str, Any], effect: str, params: Mapping[str, Any
 
 def _audience_problems(doc: Mapping[str, Any]) -> list[str]:
     """`audience` の書き方と、聴衆の軸を映像なしで使っていないか。"""
-    cfg = _notes_dropped(doc.get("audience", {}))
+    cfg = notes_dropped(doc.get("audience", {}))
     bad = ["audience の知らない項目: %s" % k for k in sorted(set(cfg) - set(AUDIENCE_KEYS))]
     bad += ["audience.%s は数" % k for k in AUDIENCE_KEYS
             if k in cfg and (not isinstance(cfg[k], (int, float)) or isinstance(cfg[k], bool))]
@@ -175,11 +172,11 @@ def _audience_problems(doc: Mapping[str, Any]) -> list[str]:
         bad.append("audience.spread は 0 以上")
     if "audience" in doc.get("files", {}):
         return bad
-    used = [k for k, v in _notes_dropped(doc.get("policy", {})).items()
+    used = [k for k, v in notes_dropped(doc.get("policy", {})).items()
             if k in policy_mod.BY and v in dims.AUDIENCE]
     used += ["overlays の moods.%s" % k for ov in doc.get("overlays", [])
              if isinstance(ov, Mapping)
-             for k, sw in _notes_dropped(ov.get("moods", {})).items()
+             for k, sw in notes_dropped(ov.get("moods", {})).items()
              if isinstance(sw, Mapping) and sw.get("by") in dims.AUDIENCE]
     bad += ["%s が聴衆の軸を使っているのに files.audience（聴衆の映像）が無い" % u
             for u in used]
@@ -193,7 +190,7 @@ def _fade_in_problems(doc: Mapping[str, Any]) -> list[str]:
     cfg = doc["fade_in"]
     if not isinstance(cfg, Mapping):
         return ['fade_in は {"after": セクション名, "seconds": 秒}']
-    cfg = _notes_dropped(cfg)
+    cfg = notes_dropped(cfg)
     bad = ["fade_in の知らない項目: %s" % k for k in sorted(set(cfg) - set(FADE_IN_KEYS))]
     bad += ["fade_in.%s が無い" % k for k in FADE_IN_KEYS if k not in cfg]
     bad += [] if isinstance(cfg.get("after", ""), str) else ["fade_in.after はセクション名"]
@@ -211,7 +208,7 @@ def _reel_problems(doc: Mapping[str, Any], root: Path) -> list[str]:
         return []
     bad = reel_mod.problems(doc["reel"], root)
     bad += ["reel と keys は一緒に使えない（どちらも背景を決める）"] \
-        if _notes_dropped(doc.get("keys", {})) else []
+        if notes_dropped(doc.get("keys", {})) else []
     bad += ["reel と files.%s は一緒に使えない（reel に {\"video\": ...} で並べる）" % r
             for r in ("opening", "closing") if r in doc.get("files", {})]
     return bad
@@ -224,7 +221,7 @@ def _fade_out_problems(doc: Mapping[str, Any]) -> list[str]:
     cfg = doc["fade_out"]
     if not isinstance(cfg, Mapping):
         return ['fade_out は {"seconds": 秒}']
-    cfg = _notes_dropped(cfg)
+    cfg = notes_dropped(cfg)
     bad = ["fade_out の知らない項目: %s" % k for k in sorted(set(cfg) - {"seconds"})]
     sec = cfg.get("seconds")
     bad += [] if isinstance(sec, (int, float)) and not isinstance(sec, bool) and sec > 0 else [
@@ -241,7 +238,7 @@ def _tempo_problems(doc: Mapping[str, Any], effect: str) -> list[str]:
     bad = [] if any(f.name == "speed" for f in effects.get(effect).fields) else [
         "tempo: %s は speed を持たない" % effect]
     try:
-        tempo_mod.from_mapping(_notes_dropped(doc["tempo"]))
+        tempo_mod.from_mapping(notes_dropped(doc["tempo"]))
     except (ValueError, AttributeError) as e:
         bad.append("tempo: " + str(e).replace("\n  ", " / "))
     return bad
@@ -249,7 +246,7 @@ def _tempo_problems(doc: Mapping[str, Any], effect: str) -> list[str]:
 
 def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     """song.json の駄目な理由を全部。空なら通る。"""
-    doc = _notes_dropped(doc)
+    doc = notes_dropped(doc)
     bad = ["知らない項目: %s" % k for k in sorted(set(doc) - set(KEYS))]
     bad += ["%s が無い" % k for k in ("title", "files", "base") if k not in doc]
     bad += _files(root, doc.get("files", {}))[1]
@@ -274,14 +271,14 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     bad += _audience_problems(doc)
     bad += _fade_in_problems(doc) + _fade_out_problems(doc) + _reel_problems(doc, root)
     try:
-        policy_mod.from_mapping(_notes_dropped(doc.get("policy", {})))
+        policy_mod.from_mapping(notes_dropped(doc.get("policy", {})))
     except ValueError as e:
         bad.append("policy: " + str(e).replace("\n  ", " / "))
     return bad
 
 
 def _audience_of(doc: Mapping[str, Any]) -> tuple[float | None, float]:
-    cfg = _notes_dropped(doc.get("audience", {}))
+    cfg = notes_dropped(doc.get("audience", {}))
     lead = cfg.get("lead")
     return (None if lead is None else float(lead)), float(cfg.get("spread", 2.0))
 
@@ -296,15 +293,15 @@ def load(root: str | Path) -> Manifest:
     files, _ = _files(root, doc["files"])
     effect, params = base_of(doc["base"])
     return Manifest(root, doc["title"], doc.get("genre") or None, files, effect, params,
-                _notes_dropped(doc.get("policy", {})),
-                _notes_dropped(doc.get("sections", {})),
-                tempo_mod.from_mapping(_notes_dropped(doc["tempo"])) if "tempo" in doc else None,
+                notes_dropped(doc.get("policy", {})),
+                notes_dropped(doc.get("sections", {})),
+                tempo_mod.from_mapping(notes_dropped(doc["tempo"])) if "tempo" in doc else None,
                 overlay_mod.from_list(doc.get("overlays", [])),
                 *_audience_of(doc), _keys(root, doc.get("keys", {}))[0],
                 doc.get("base_plain", False), float(doc.get("clip_xfade", 0.0)),
                 doc.get("clip_transition", "fade"),
-                _notes_dropped(doc["credits"]) if "credits" in doc else None,
-                _notes_dropped(doc.get("moods", {})),
-                _notes_dropped(doc["fade_in"]) if "fade_in" in doc else None,
+                notes_dropped(doc["credits"]) if "credits" in doc else None,
+                notes_dropped(doc.get("moods", {})),
+                notes_dropped(doc["fade_in"]) if "fade_in" in doc else None,
                 float(doc["fade_out"]["seconds"]) if "fade_out" in doc else None,
                 reel_mod.from_list(doc["reel"], root) if "reel" in doc else ())

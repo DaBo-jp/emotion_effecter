@@ -10,6 +10,9 @@
     policy      感情 → 見た目（写像はここだけ）
     drive       cymatics の effect を包んで動かす
     video       ffmpeg でつなぐ・揃える・並べる
-    production  Opening / 本編 / Closing の三段
+    production  本編を並列に描いてつなぎ、音を乗せる
+    workflow    1曲を最初から最後まで（liveflow はライブ動画1本）
+
+全部の一覧と層は `architecture.LAYERS` と README の「構成」。
 """
 __version__ = "0.1.0"

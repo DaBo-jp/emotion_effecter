@@ -32,7 +32,6 @@ song.json の `sections` に手で書いた値が勝つ。
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import tempfile
@@ -48,6 +47,7 @@ from . import (
     audience,
     backdrop,
     casting,
+    digest,
     dims,
     drive,
     elements,
@@ -216,7 +216,7 @@ def effect_note(m: Manifest) -> str:
 
 def _scenery_of(path: str, note: str, text: str, o: Outputs, redo: Iterable[str],
                 say: Say) -> scenery.Scenery:
-    sha = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    sha = digest.sha256(path)
     key = {"image": sha, "effect": note, "lyrics": text}
     dst = Path(o["scenery"]) / ("%s_%s.json" % (Path(path).stem, sha[:8]))
     sc = None if "scenery" in redo or not dst.exists() else scenery.load(dst, key)
@@ -332,7 +332,7 @@ def _merge(*extras: list[dict] | None) -> list[dict] | None:
 
 
 def build_timeline(m: Manifest, song: lyrics.Song, moods: list[mood.Mood],
-                   xfade: float = 2.0,
+                   xfade: float = XFADE,
                    cheered: list[audience.Cheer] | None = None) -> timeline.Timeline:
     return timeline.build(song, moods, audio.duration(m.file("audio")), fps_of(m), xfade,
                           cheered)

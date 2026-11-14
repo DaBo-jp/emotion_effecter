@@ -36,7 +36,7 @@ wheels = [
 [[package]]
 name = "cymatics"
 version = "0.1.0"
-source = { git = "https://github.com/DaBo-jp/cymatics.git?rev=1c4d18ea0f64d7a2be4bc00a99853cd696224277#1c4d18ea0f64d7a2be4bc00a99853cd696224277" }
+source = { git = "https://github.com/DaBo-jp/cymatics.git?rev=10763e7be775a4846a903a535eb3f22772b5d55f#10763e7be775a4846a903a535eb3f22772b5d55f" }
 dependencies = [
     { name = "numpy" },
     { name = "pillow" },
@@ -59,7 +59,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cymatics", git = "https://github.com/DaBo-jp/cymatics.git?rev=1c4d18ea0f64d7a2be4bc00a99853cd696224277" },
+    { name = "cymatics", git = "https://github.com/DaBo-jp/cymatics.git?rev=10763e7be775a4846a903a535eb3f22772b5d55f" },
     { name = "typesafe-sdk", specifier = ">=0.7.5" },
 ]
 

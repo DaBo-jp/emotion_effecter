@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -22,7 +21,7 @@ from types import MappingProxyType
 
 from typesafe_sdk import AsyncTypeSafeClient, Image, Score
 
-from . import video
+from . import doc, jev, video
 from .lyrics import Song
 
 #: 保存形式の版。読めない版は断る
@@ -120,12 +119,8 @@ def stills(clip: str, shots: Sequence[Shot], tmp: str) -> list[list[str]]:
 
 
 def from_response(shot: Shot, resp) -> Cheer:
-    """System One の応答 → Cheer。Score は最上段で割って 0..1 にする。"""
-    scores, conf, dist = {}, {}, {}
-    for name, a in resp.scores.items():
-        scores[name] = a.score / max(a.probabilities)
-        conf[name] = a.confidence
-        dist[name] = {str(k): v for k, v in a.probabilities.items()}
+    """System One の応答 → Cheer。Score は最上段で割って 0..1 にする（`jev.level`）。"""
+    scores, conf, dist = jev.scores(resp.scores)
     return Cheer(shot.section, shot.t, shot.at, scores, conf, dist)
 
 
@@ -142,23 +137,16 @@ async def score_shots(shots: Sequence[Shot], paths: Sequence[Sequence[str]],
 def score(shots: Sequence[Shot], paths: Sequence[Sequence[str]],
           questions: Mapping[str, Score] = QUESTIONS) -> list[Cheer]:
     """`questions` は聴衆を見る `QUESTIONS` か、ライブ映像そのものを見る `SCENE`。"""
-    async def run() -> list[Cheer]:
-        async with AsyncTypeSafeClient() as client:
-            return await score_shots(shots, paths, client, questions)
-    return asyncio.run(run())
+    return jev.run(lambda client: score_shots(shots, paths, client, questions))
 
 
 def save(path: str | Path, title: str, sync: Mapping[str, float],
          cheers: Sequence[Cheer]) -> None:
     """`sync` は時刻合わせの記録（`lead` と山の鋭さ）。採点と一緒に残す。"""
-    doc = {"format": FORMAT, "title": title, "sync": dict(sync),
-           "cheers": [asdict(c) for c in cheers]}
-    Path(path).write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
+    doc.write(path, {"format": FORMAT, "title": title, "sync": dict(sync),
+                     "cheers": [asdict(c) for c in cheers]})
 
 
 def load(path: str | Path) -> list[Cheer]:
-    doc = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(doc, dict) or doc.get("format") != FORMAT:
-        raise ValueError("%s: 聴衆の採点ファイルの形式が違う（format=%d を期待）"
-                         % (path, FORMAT))
-    return [Cheer(**{**c, "at": tuple(c["at"])}) for c in doc["cheers"]]
+    d = doc.read_versioned(path, FORMAT, "聴衆の採点ファイル")
+    return [Cheer(**{**c, "at": tuple(c["at"])}) for c in d["cheers"]]

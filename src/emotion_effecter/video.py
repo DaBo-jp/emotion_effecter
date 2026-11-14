@@ -87,10 +87,15 @@ def conform(src: str, dst: str, fps: int, frames: int) -> str:
     return dst
 
 
+def _quoted(path: str) -> str:
+    """concat の一覧に書くパス。`'` を含む曲名でも切れないよう、ffmpeg の書き方で囲む。"""
+    return "'%s'" % path.replace("'", "'\\''")
+
+
 def concat(parts: Sequence[str], dst: str) -> str:
     """同じ形式の動画を再エンコードせずにつなぐ。"""
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
-        fh.writelines("file '%s'\n" % os.path.abspath(p) for p in parts)
+        fh.writelines("file %s\n" % _quoted(os.path.abspath(p)) for p in parts)
     try:
         _ff("-f", "concat", "-safe", "0", "-i", fh.name, "-c", "copy", dst)
     finally:
