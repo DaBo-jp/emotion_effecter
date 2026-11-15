@@ -1,6 +1,6 @@
 """手元の UI から呼ぶ操作。**HTTP も画面も知らない**——`ui` はこれを呼んで返すだけ。
 
-- 曲の一覧と、出力の有無（`songs`）
+- 曲の一覧と、出力の有無（`songs`）。素材の一覧（`materials`：曲のファイルと出力）
 - song.json を読む・検証する・書く（`doc_of` / `check` / `save`）。書けるものの候補
   （preset・effect・切り替え・ファイル）は `choices` / `files_in`
 - タイムライン（`timeline` / `suggest` / `save_timeline`）。波形の山・拍・セクションの
@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from . import crt, lines, lyrics, manifest, structure, video
+from . import crt, lines, lyrics, manifest, roll, sing, structure, video
 from .beats import analyze
 from .doc import write
 from .workflow import NAMES, REDO, STEPS
@@ -98,13 +98,63 @@ def files_in(song_dir: Path) -> dict[str, list[str]]:
             for k, exts in KINDS.items()}
 
 
+#: 素材の一覧に出す、出力の拡張子（`out/<曲>/` の中）。種類は KINDS ＋ data
+OUT_KINDS: Mapping[str, tuple[str, ...]] = MappingProxyType({**KINDS, "data": (".json",)})
+
+
+def _kind(path: Path, kinds: Mapping[str, tuple[str, ...]]) -> str | None:
+    return next((k for k, exts in kinds.items() if path.suffix.lower() in exts), None)
+
+
+def _rows(base: Path, paths: Sequence[Path], kinds: Mapping[str, tuple[str, ...]],
+          roles: Mapping[str, str], where: str) -> list[dict[str, Any]]:
+    out = []
+    for p in paths:
+        kind, rel = _kind(p, kinds), str(p.relative_to(base))
+        if kind is not None and p.is_file():
+            st = p.stat()
+            out.append({"where": where, "path": rel, "kind": kind, "size": st.st_size,
+                        "mtime": st.st_mtime,
+                        "roles": sorted(r for r, v in roles.items() if v == rel)})
+    return out
+
+
+def materials(song_dir: Path, out: Path) -> list[dict[str, Any]]:
+    """素材の一覧：曲のディレクトリのファイル（`where="song"`、song.json の `files` の
+    役割つき）と、出力（`where="out"`、`out/<曲>/` の直下）。"""
+    try:
+        files = doc_of(song_dir).get("files", {})
+    except ValueError:
+        files = {}
+    roles = {r: v for r, v in files.items() if isinstance(v, str)} \
+        if isinstance(files, Mapping) else {}
+    rows = _rows(song_dir, sorted(song_dir.rglob("*")), KINDS, roles, "song")
+    if out.is_dir():
+        rows += _rows(out, sorted(out.iterdir()), OUT_KINDS, {}, "out")
+    return rows
+
+
+def inside(base: Path, rel: str) -> Path:
+    """`base` の中のファイル。外へ出る道（`..` や絶対パス）は断る。"""
+    path = (base / rel).resolve()
+    if not path.is_relative_to(base.resolve()) or not path.is_file():
+        raise ValueError("ファイルが無い: %s" % rel)
+    return path
+
+
 def choices() -> dict[str, Any]:
     """画面の選択肢。preset・effect・切り替え・crt の既定・工程。"""
     from cymatics import effects, presets
 
     return {"presets": sorted(presets.names()), "effects": sorted(effects.names()),
             "transitions": list(video.TRANSITIONS), "crt": crt.Crt().to_dict(),
-            "steps": list(STEPS), "redo": list(REDO)}
+            "steps": list(STEPS), "redo": list(REDO), "credits": credit_positions()}
+
+
+def credit_positions() -> dict[str, list[str]]:
+    """歌詞の出し方（`credits.mode`）→ 置ける位置（最初が既定）。"""
+    return {**{m: list(roll.POSITIONS) for m in roll.MODES},
+            **{m: list(ps) for m, ps in sing.MODES.items()}}
 
 
 def section_names(song_dir: Path) -> list[str]:

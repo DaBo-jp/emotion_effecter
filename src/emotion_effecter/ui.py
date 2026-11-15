@@ -114,6 +114,19 @@ def _out_routes(api: FastAPI, dk: Desk) -> None:
         return FileResponse(path, headers={"Cache-Control": "no-store"})
 
 
+def _material_routes(api: FastAPI, dk: Desk) -> None:
+    @api.get("/api/songs/{name}/materials")
+    def materials(name: str) -> list[dict[str, Any]]:
+        return desk.materials(dk.song(name), dk.outdir(name))
+
+    @api.get("/api/songs/{name}/files/{path:path}")
+    def file(name: str, path: str) -> FileResponse:
+        try:
+            return FileResponse(desk.inside(dk.song(name), path))
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+
 def _job_routes(api: FastAPI, dk: Desk) -> None:
     @api.post("/api/songs/{name}/jobs")
     def start(name: str, req: dict[str, Any] = Body(...)) -> dict[str, Any]:
@@ -142,7 +155,8 @@ def _job_routes(api: FastAPI, dk: Desk) -> None:
 def app(data: Path, out: Path) -> FastAPI:
     api = FastAPI(title="emotion_effecter")
     dk = Desk(data.resolve(), out.resolve())
-    for add in (_song_routes, _timeline_routes, _out_routes, _job_routes):
+    for add in (_song_routes, _material_routes, _timeline_routes, _out_routes,
+                _job_routes):
         add(api, dk)
 
     @api.get("/", response_class=HTMLResponse)

@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -101,6 +102,24 @@ def test_suggest_that_cannot_place_says_why(client):
 def test_audio_is_served_for_the_player(client):
     r = client.get("/api/songs/S/media/audio")
     assert r.status_code == 200 and r.content[:4] == b"RIFF"
+
+
+def test_materials_list_song_files_with_roles_and_outputs(client, root):
+    (root / "out" / "S").mkdir(parents=True)
+    (root / "out" / "S" / "mood.json").write_text("{}", encoding="utf-8")
+    (root / "out" / "S" / "ui-job.log").write_text("", encoding="utf-8")   # 素材ではない
+    rows = client.get("/api/songs/S/materials").json()
+    got = {(r["where"], r["path"]): (r["kind"], r["roles"]) for r in rows}
+    assert got == {("song", "a.wav"): ("audio", ["audio"]), ("song", "i.png"): ("image", ["image"]),
+                   ("song", "l.txt"): ("lyrics", ["lyrics"]), ("out", "mood.json"): ("data", [])}
+
+
+def test_song_files_are_served_but_not_outside(client):
+    assert client.get("/api/songs/S/files/i.png").content[:4] == b"\x89PNG"
+    assert client.get("/api/songs/S/files/../S/i.png").status_code in (200, 404)
+    assert client.get("/api/songs/S/files/%2e%2e/song.json").status_code == 404
+    with pytest.raises(ValueError):
+        desk.inside(Path("/tmp"), "../etc/passwd")
 
 
 def test_command_is_built_from_steps():
