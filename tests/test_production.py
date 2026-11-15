@@ -198,7 +198,7 @@ def test_channel_works_inside_a_chain(tmp_path):
         _ff("-f", "lavfi", "-i", "color=c=%s:size=64x36:rate=10:duration=1" % c, p)
         srcs.append(video.source(p, False, 10, 10, (64, 36)))
     dst = video.chain(srcs, [10, 10], [0, 4], ["fade", "channel"], 10,
-                      str(tmp_path / "x.mp4"))
+                      str(tmp_path / "x.mp4"), (64, 36))
     assert video.count_frames(dst) == 16
 
 
@@ -262,3 +262,28 @@ def test_finish_without_anything_still_writes(tmp_path):
     src = str(tmp_path / "w.mp4")
     _ff("-f", "lavfi", "-i", "color=c=white:size=32x18:rate=10:duration=1", src)
     assert video.count_frames(video.finish(src, str(tmp_path / "x.mp4"), 10, 10)) == 10
+
+
+def test_channel_seam_is_the_same_picture_as_the_ffmpeg_expression(tmp_path):
+    """つなぎ目を別に描いても（`channel_seam`）、ffmpeg の数式（`channel_expr`）で描いたのと
+    同じ絵。10fps なら P がどちらでも同じ float になり、書き出す前の絵は画素まで同じ
+    （x264 の判断が数画素だけ変わる）。"""
+    clips = []
+    for name, src in (("a", "testsrc2"), ("b", "mandelbrot")):
+        clips.append(str(tmp_path / ("%s.mp4" % name)))
+        _ff("-f", "lavfi", "-i", "%s=size=64x36:rate=10" % src, "-frames:v", "12", clips[-1])
+    new = _gray(video.crossfade(clips, [12, 12], 6, 10, str(tmp_path / "x.mp4"), "channel"),
+                36, 64)
+    old = str(tmp_path / "old.mp4")
+    pre = "[0:v]settb=AVTB,setpts=PTS-STARTPTS[v0];[1:v]settb=AVTB,setpts=PTS-STARTPTS[v1];"
+    _ff("-i", clips[0], "-i", clips[1], "-filter_complex",
+        pre + video._xfade("[v0]", "[v1]", "channel", 6, 6, 10, "[o]"), "-map", "[o]",
+        "-frames:v", "18", *video.ENCODE, old)
+    diff = np.abs(new - _gray(old, 36, 64))
+    assert len(new) == 18 and diff.mean() < 0.05 and diff.max() <= 8
+
+
+def test_channel_falls_back_to_the_expression_when_clips_are_short(tmp_path):
+    """前の素材が重なりより短い（つなぎ目どうしが重なる）ときは数式で描く。"""
+    assert not video._separable([10, 4, 10], [0, 3, 3], 2)
+    assert video._separable([10, 6, 10], [0, 3, 3], 2)

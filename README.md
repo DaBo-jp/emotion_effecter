@@ -597,6 +597,11 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
   まま（veryfast は CPU が半分だが、同じ crf で画質が目に見えて落ちる）
 - 重ねる PNG は1回だけ読んで使い回す（`-loop 1` の読み直しは2枚で1フレーム約 50ms）。
   20秒の 1080p で、つなぎ・黒・crt の書き出しの CPU が 109 → 45秒。絵は前と画素まで同じ
+- **`channel` のつなぎ目は別に描いて差し込む**（`video.channel_seam`）。ffmpeg の数式
+  （`channel_expr`）で描くと 1080p で1フレーム約 5秒かかるので、前後のフレームを取り出して
+  cymatics の `render.channel`（C++、無ければ numpy）で同じ式を描き、ffv1 の短い動画に
+  してつなぐ。15フレームのつなぎ目1つで CPU 80 → 11秒。素材が短くてつなぎ目どうしが
+  重なるときだけ数式で描く
 
 ## 開発
 

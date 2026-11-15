@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 import numpy as np
+from cymatics.render import channel
 from PIL import Image, ImageDraw, ImageFont
 
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -158,13 +159,101 @@ def channel_expr() -> str:
 def _xfade(a: str, b: str, transition: str, frames: int, offset: int, fps: int,
            out: str) -> str:
     """`a` から `b` へ `frames` フレームで移る xfade（`offset` フレーム目から）。
-    `channel` は数式の切り替え（custom）。式は 8bit の 4:4:4 で書いてあるので揃えて渡す。"""
+    `channel` を数式（custom）で描くのは、つなぎ目を別に描けないときだけ（`_links`）。
+    式は 8bit の 4:4:4 で書いてあるので揃えて渡す。"""
     tail = "duration=%.6f:offset=%.6f%s" % (frames / fps, offset / fps, out)
     if transition != "channel":
         return "%s%sxfade=transition=%s:%s" % (a, b, transition, tail)
     tag = out.strip("[]")
     return ("%sformat=yuv444p[%sa];%sformat=yuv444p[%sb];[%sa][%sb]xfade=transition=custom:"
             "expr='%s':%s" % (a, tag, b, tag, tag, tag, channel_expr(), tail))
+
+
+#: 1本の素材：(ffmpeg の入力の引数, 前処理のフィルタ)。`source` が作る
+type Source = tuple[list[str], str]
+
+
+def _yuv444(src: Source, first: int, count: int, size: tuple[int, int]) -> np.ndarray:
+    """素材の `first` フレーム目から `count` フレーム（`(count, 3, H, W)` の YUV 4:4:4）。"""
+    args, vf = src
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", *args, "-filter_complex",
+         "[0:v]%s,trim=start_frame=%d:end_frame=%d,setpts=PTS-STARTPTS,format=yuv444p[o]"
+         % (vf, first, first + count),
+         "-map", "[o]", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "yuv444p", "-"],
+        capture_output=True, check=True).stdout
+    w, h = size
+    return np.frombuffer(raw, np.uint8).reshape(count, 3, h, w)
+
+
+def channel_seam(a: Source, a_frames: int, b: Source, overlap: int, fps: int,
+                 size: tuple[int, int], dst: str) -> str:
+    """`channel` のつなぎ目だけの動画（`a` の終わり `overlap` フレーム → `b` の頭）。
+
+    ffmpeg の数式（`channel_expr`）と同じ絵を、cymatics の C++ の部品（無ければ numpy）で
+    描く——数式を画素ごとに解釈すると 1080p で1フレーム約 5秒、ここでは 0.07秒。
+    つなぎ目は短いので、劣化しない ffv1（4:4:4）で書く。
+    """
+    tail, head = _yuv444(a, a_frames - overlap, overlap, size), _yuv444(b, 0, overlap, size)
+    w, h = size
+    proc = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv444p",
+         "-s", "%dx%d" % (w, h), "-r", str(fps), "-i", "-", "-c:v", "ffv1", dst],
+        stdin=subprocess.PIPE)
+    with proc.stdin:
+        for k in range(overlap):
+            proc.stdin.write(channel.frame(tail[k], head[k], channel.progress(k, overlap)))
+    if proc.wait() != 0:
+        raise RuntimeError("ffmpeg がつなぎ目を書けなかった: %s" % dst)
+    return dst
+
+
+def _spliced(cur: str, i: int, seam: int, overlap: int, length: int, fps: int,
+             out: str) -> str:
+    """`cur` の終わり `overlap` フレームと `[v{i}]` の頭を、別に描いたつなぎ目
+    （入力 `seam`）で置き換えてつなぐ。フレーム数は xfade と同じ。"""
+    t = out.strip("[]")
+    return ("%strim=end_frame=%d,setpts=PTS-STARTPTS[%sa];"
+            "[v%d]trim=start_frame=%d,setpts=PTS-STARTPTS[%sb];"
+            "[%d:v]settb=AVTB,setpts=N/%d/TB[%st];"
+            "[%sa][%st][%sb]concat=n=3:v=1:a=0%s"
+            % (cur, length - overlap, t, i, overlap, t, seam, fps, t, t, t, t, out))
+
+
+def _separable(frames: Sequence[int], overlaps: Sequence[int], i: int) -> bool:
+    """つなぎ目 i の前の素材の終わりが、その前のつなぎ目と重ならない（別に描ける）。"""
+    before = overlaps[i - 1] if i > 1 else 0
+    return frames[i - 1] >= overlaps[i] + before and frames[i] >= overlaps[i]
+
+
+def _links(srcs: Sequence[Source], frames: Sequence[int], overlaps: Sequence[int],
+           transitions: Sequence[str], fps: int, size: tuple[int, int],
+           tmp: str) -> tuple[list[str], list[str], str, int]:
+    """`[v0]`, `[v1]`, ... をつなぐフィルタ：(足す入力の引数, フィルタの並び, 出口, フレーム数)。
+    つなぎ目 i ごとに `overlaps[i]` フレーム重ねて `transitions[i]` で移る（0 なら切り替え）。"""
+    links, extra, cur, length = [], [], "[v0]", frames[0]
+    for i in range(1, len(srcs)):
+        nxt, ov, tr = "[x%d]" % i, overlaps[i], transitions[i]
+        if not ov:
+            links.append("%s[v%d]concat=n=2:v=1:a=0%s" % (cur, i, nxt))
+        elif tr == "channel" and _separable(frames, overlaps, i):
+            seam = channel_seam(srcs[i - 1], frames[i - 1], srcs[i], ov, fps, size,
+                                os.path.join(tmp, "seam%d.mkv" % i))
+            links.append(_spliced(cur, i, len(srcs) + len(extra) // 2, ov, length, fps, nxt))
+            extra += ["-i", seam]
+        else:
+            links.append(_xfade(cur, "[v%d]" % i, tr, ov, length - ov, fps, nxt))
+        cur, length = nxt, length + frames[i] - ov
+    return extra, links, cur, length
+
+
+def size_of(path: str) -> tuple[int, int]:
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=width,height", "-of", "csv=p=0", path],
+        capture_output=True, text=True, check=True).stdout.strip()
+    w, h = out.split(",")[:2]
+    return int(w), int(h)
 
 
 def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: int,
@@ -177,22 +266,28 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
     """
     if transition not in TRANSITIONS:
         raise ValueError("知らない切り替え: %s" % transition)
-    pre = ";".join("[%d:v]settb=AVTB,setpts=PTS-STARTPTS[v%d]" % (i, i)
-                   for i in range(len(parts)))
-    chain, cur, length = [], "[v0]", frames[0]
-    for i in range(1, len(parts)):
-        nxt = "[x%d]" % i
-        chain.append(_xfade(cur, "[v%d]" % i, transition, overlap, length - overlap, fps, nxt))
-        cur, length = nxt, length + frames[i] - overlap
-    inputs = [x for p in parts for x in ("-i", p)]
-    more, graph, cur = _finishing(fin or Finish(), cur, len(parts), length, fps)
-    _ff(*inputs, *more, "-filter_complex", ";".join([pre, *chain, *graph]), "-map", cur,
-        "-frames:v", str(length), "-an", *ENCODE, dst)
+    srcs = [(["-i", p], "null") for p in parts]
+    n = len(parts)
+    return _join(srcs, frames, [overlap] * n, [transition] * n, fps, size_of(parts[0]),
+                 dst, fin or Finish(), ())
+
+
+def _join(srcs: Sequence[Source], frames: Sequence[int], overlaps: Sequence[int],
+          transitions: Sequence[str], fps: int, size: tuple[int, int], dst: str,
+          fin: Finish, enc: Sequence[str]) -> str:
+    """素材をつないで（`_links`）仕上げ（`_finishing`）、1回で書き出す（音なし）。"""
+    pre = ";".join("[%d:v]%s,settb=AVTB,setpts=PTS-STARTPTS[v%d]" % (i, vf, i)
+                   for i, (_args, vf) in enumerate(srcs))
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(dst))) as tmp:
+        extra, links, cur, length = _links(srcs, frames, overlaps, transitions, fps, size, tmp)
+        more, graph, cur = _finishing(fin, cur, len(srcs) + len(extra) // 2, length, fps)
+        inputs = [x for args, _vf in srcs for x in args]
+        _ff(*inputs, *extra, *more, "-filter_complex", ";".join([pre, *links, *graph]),
+            "-map", cur, "-frames:v", str(length), "-an", *ENCODE, *enc, dst)
     return dst
 
 
-def source(src: str, still: bool, fps: int, frames: int,
-           size: tuple[int, int]) -> tuple[list[str], str]:
+def source(src: str, still: bool, fps: int, frames: int, size: tuple[int, int]) -> Source:
     """`chain` に渡す1本：(入力の引数, フィルタ)。画面 `size` を覆うように拡大して中央で
     切り、ちょうど `frames` フレームに。動画が足りなければ最後のフレームで止める。"""
     w, h = size
@@ -205,25 +300,13 @@ def source(src: str, still: bool, fps: int, frames: int,
         fps, fit, frames)
 
 
-def chain(sources: Sequence[tuple[list[str], str]], frames: Sequence[int],
-          overlaps: Sequence[int], transitions: Sequence[str], fps: int, dst: str) -> str:
+def chain(sources: Sequence[Source], frames: Sequence[int], overlaps: Sequence[int],
+          transitions: Sequence[str], fps: int, dst: str, size: tuple[int, int]) -> str:
     """`source` の並びを1回の書き出しでつなぐ（音なし）。つなぎ目 i ごとに `overlaps[i]`
-    フレーム重ねて `transitions[i]` で移る。0 なら切り替え。`overlaps[0]` は使わない。"""
-    pre = ";".join("[%d:v]%s,settb=AVTB,setpts=PTS-STARTPTS[v%d]" % (i, vf, i)
-                   for i, (_args, vf) in enumerate(sources))
-    links, cur, length = [], "[v0]", frames[0]
-    for i in range(1, len(sources)):
-        nxt, ov = "[x%d]" % i, overlaps[i]
-        if ov:
-            links.append(_xfade(cur, "[v%d]" % i, transitions[i], ov, length - ov, fps, nxt))
-        else:
-            links.append("%s[v%d]concat=n=2:v=1:a=0%s" % (cur, i, nxt))
-        cur, length = nxt, length + frames[i] - ov
-    inputs = [x for args, _vf in sources for x in args]
-    _ff(*inputs, "-filter_complex", ";".join([pre, *links]), "-map", cur,
-        "-frames:v", str(length), "-an", "-c:v", "libx264", "-crf", CRF,
-        "-tune", "stillimage", "-pix_fmt", "yuv420p", "-r", str(fps), dst)
-    return dst
+    フレーム重ねて `transitions[i]` で移る。0 なら切り替え。`overlaps[0]` は使わない。
+    `size` は `source` に渡した画面の大きさ。"""
+    return _join(sources, frames, overlaps, transitions, fps, size, dst, Finish(),
+                 ("-tune", "stillimage", "-r", str(fps)))
 
 
 @dataclass(frozen=True)

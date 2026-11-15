@@ -219,4 +219,4 @@ def write(dst: str, spans: Sequence[Span], frames: int, fps: int,
     sources = [video.source(s.seg.path, s.seg.kind == "image", fps, n, size)
                for s, n in zip(spans, lengths)]
     return video.chain(sources, lengths, [s.overlap for s in spans],
-                       [s.seg.transition for s in spans], fps, dst)
+                       [s.seg.transition for s in spans], fps, dst, size)
