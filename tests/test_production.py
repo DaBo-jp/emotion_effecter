@@ -235,3 +235,30 @@ def test_crt_is_recorded_and_keeps_the_length(tmp_path, media):
     rec = production.produce("stave", params, None, out, closing=closing, chunk_seconds=2,
                              crt=crt.Crt(band_direction="up"))
     assert rec["crt"]["band_direction"] == "up" and video.count_frames(out) == 60
+
+
+def test_crossfade_finishes_in_the_same_pass(tmp_path):
+    """つなぎ目を重ねるときは、仕上げ（黒・重ね）も同じ1回の書き出しで。
+    別々に書き出したのと同じ絵になる（どちらも1回ずつ丸めるぶんの差だけ）。"""
+    from emotion_effecter import crt
+
+    clips = []
+    for name, col in (("a", "gray"), ("b", "white")):
+        clips.append(str(tmp_path / ("%s.mp4" % name)))
+        _ff("-f", "lavfi", "-i", "color=c=%s:size=64x40:rate=10:duration=2" % col, clips[-1])
+    lays = tuple(crt.layers(crt.Crt(scanlines=0.5, band=0.6), (64, 40), str(tmp_path)))
+    fin = video.Finish(black_in=(0.0, 0.5), black_out=0.5, layers=lays)
+    one = _gray(video.crossfade(clips, [20, 20], 6, 10, str(tmp_path / "one.mp4"), "fade",
+                                fin), 40, 64)
+    two = _gray(video.finish(video.crossfade(clips, [20, 20], 6, 10, str(tmp_path / "x.mp4")),
+                             str(tmp_path / "two.mp4"), 34, 10, fin.black_in, fin.black_out,
+                             fin.layers), 40, 64)
+    assert len(one) == len(two) == 34
+    assert one[0].max() < 30 and one[-1].mean() < one[20].mean() / 3    # 黒から入って黒へ
+    assert np.abs(one - two).max() <= 6
+
+
+def test_finish_without_anything_still_writes(tmp_path):
+    src = str(tmp_path / "w.mp4")
+    _ff("-f", "lavfi", "-i", "color=c=white:size=32x18:rate=10:duration=1", src)
+    assert video.count_frames(video.finish(src, str(tmp_path / "x.mp4"), 10, 10)) == 10

@@ -95,21 +95,29 @@ def record(spec: Mapping[str, Any], pol: Policy, c: Cut, chunks: list[drive.Chun
 
 
 def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None,
-              tmp: str, transition: str = "fade") -> str:
-    """Opening + 本編の区間 + Closing を音なしの1本にする。"""
+              tmp: str, transition: str = "fade", fin: video.Finish = video.Finish()) -> str:
+    """Opening + 本編の区間 + Closing を音なしの1本にして、仕上げ `fin` をかける。
+
+    **書き出しは1回だけ**（1080p の x264 medium は1フレーム約 50ms の CPU で、絵を描く
+    のと同じくらい重い）。重ねるならつなぐときに仕上げも、重ねないならつないでから。
+    """
     if c.fade:
-        return _blended(parts, c, opening, closing, tmp, transition)
+        return _blended(parts, c, opening, closing, tmp, transition, fin)
     if opening:
         parts = [video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps, c.body0),
                  *parts]
     if closing:
         parts = [*parts, video.conform(closing, os.path.join(tmp, "closing.mp4"),
                                        c.fps, c.total - c.body1)]
-    return video.concat(parts, os.path.join(tmp, "video.mp4"))
+    silent = video.concat(parts, os.path.join(tmp, "video.mp4"))
+    if fin.empty():
+        return silent
+    return video.finish(silent, os.path.join(tmp, "finish.mp4"), c.total, c.fps,
+                        fin.black_in, fin.black_out, fin.layers)
 
 
 def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
-             tmp: str, transition: str) -> str:
+             tmp: str, transition: str, fin: video.Finish) -> str:
     """つなぎ目を `c.fade` フレーム重ねて混ぜる。本編の区間は重なりのぶん長く描いてある。"""
     f0, f1 = c.drawn()
     clips = [(video.concat(parts, os.path.join(tmp, "body.mp4")), f1 - f0)]
@@ -120,7 +128,7 @@ def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
         clips.append((video.conform(closing, os.path.join(tmp, "closing.mp4"), c.fps,
                                     c.total - c.body1), c.total - c.body1))
     return video.crossfade([p for p, _ in clips], [n for _, n in clips], c.fade, c.fps,
-                           os.path.join(tmp, "video.mp4"), transition)
+                           os.path.join(tmp, "video.mp4"), transition, fin)
 
 
 def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: str, *,
@@ -146,12 +154,10 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
         chunks = drive.plan_chunks(f0, f1, size, tmp)
         parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays, roll)
-        silent = _assemble(parts, c, opening, closing, tmp, transition)
         lays = crt_mod.layers(crt, (int(spec["width"]), int(spec["height"])), tmp) \
             if crt is not None else []
-        if black is not None or black_out is not None or lays:
-            silent = video.finish(silent, os.path.join(tmp, "finish.mp4"), c.total, c.fps,
-                                  black, black_out, lays)
+        silent = _assemble(parts, c, opening, closing, tmp, transition,
+                           video.Finish(black, black_out, tuple(lays)))
         video.mux(silent, spec["audio"], out, c.total / c.fps)
     src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
            "closing": closing, **(sources or {})}

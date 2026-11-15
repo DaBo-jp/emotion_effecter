@@ -9,6 +9,7 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -17,6 +18,11 @@ FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
 #: 揃え直す・混ぜるときの画質（x264 の crf）。この後 cymatics の絵とつなぐので高めに
 CRF = "16"
+#: 書き出しの x264 の設定。preset は medium（x264 の既定）のまま——同じ crf で veryfast は
+#: CPU が半分だが画質が目に見えて落ちる（1080p で SSIM 22.6 → 20.2dB、大きさは同じ）。
+#: ∴ 速くするのは「書き出す回数を減らす」方で（`crossfade` の `fin`）
+ENCODE: tuple[str, ...] = ("-c:v", "libx264", "-preset", "medium", "-crf", CRF,
+                           "-pix_fmt", "yuv420p")
 
 
 def _ff(*args: str) -> None:
@@ -83,7 +89,7 @@ def still_at(path: str, t: float, dst: str) -> str:
 def conform(src: str, dst: str, fps: int, frames: int) -> str:
     """fps を揃えて、ちょうど frames フレームに切る。音は捨てる（後で乗せ直す）。"""
     _ff("-i", src, "-vf", "fps=%d" % fps, "-frames:v", str(frames), "-an",
-        "-c:v", "libx264", "-crf", CRF, "-pix_fmt", "yuv420p", dst)
+        *ENCODE, dst)
     return dst
 
 
@@ -162,9 +168,9 @@ def _xfade(a: str, b: str, transition: str, frames: int, offset: int, fps: int,
 
 
 def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: int,
-              dst: str, transition: str = "fade") -> str:
+              dst: str, transition: str = "fade", fin: Finish | None = None) -> str:
     """動画をつなぐ。つなぎ目ごとに `overlap` フレーム重ねて `transition` で切り替える
-    （音なし）。
+    （音なし）。`fin` があれば仕上げ（`finish`）も**同じ1回の書き出しで**かける。
 
     `frames` は各動画のフレーム数。重ねたぶん短くなる——呼ぶ側が重なりのぶん
     長く用意する。オフセットはフレームで数えるので1フレームもずれない。
@@ -179,9 +185,9 @@ def crossfade(parts: Sequence[str], frames: Sequence[int], overlap: int, fps: in
         chain.append(_xfade(cur, "[v%d]" % i, transition, overlap, length - overlap, fps, nxt))
         cur, length = nxt, length + frames[i] - overlap
     inputs = [x for p in parts for x in ("-i", p)]
-    _ff(*inputs, "-filter_complex", ";".join([pre, *chain]), "-map", cur,
-        "-frames:v", str(length), "-an", "-c:v", "libx264", "-crf", CRF,
-        "-pix_fmt", "yuv420p", dst)
+    more, graph, cur = _finishing(fin or Finish(), cur, len(parts), length, fps)
+    _ff(*inputs, *more, "-filter_complex", ";".join([pre, *chain, *graph]), "-map", cur,
+        "-frames:v", str(length), "-an", *ENCODE, dst)
     return dst
 
 
@@ -220,32 +226,61 @@ def chain(sources: Sequence[tuple[list[str], str]], frames: Sequence[int],
     return dst
 
 
-def finish(src: str, dst: str, frames: int, fps: int,
-           black_in: tuple[float, float] | None = None,
-           black_out: float | None = None,
-           layers: Sequence[tuple[str, str]] = ()) -> str:
-    """つないだ1本の仕上げ（音なし）。画面ぜんたい（絵・effect・歌詞）にかかる。
+@dataclass(frozen=True)
+class Finish:
+    """つないだ1本の仕上げ。画面ぜんたい（絵・effect・歌詞）にかかる。フレーム数は変えない。
 
     `layers`＝(透過 PNG, y の式) の並び：下から順に、左端そろえで y の位置に重ねる
     （y は overlay の式。`t` 秒・`H` 画面の高さ・`h` 重ねる絵の高さが使える）。
     `black_in`＝(開始秒, 秒数)：開始秒までは真っ黒、そこから秒数で元の絵へ。
     `black_out`＝秒数：最後のその秒数で黒へ落ち、最後のフレームが真っ黒。
-    黒は重ねたものごと落とす。フレーム数は変えない。
+    黒は重ねたものごと落とす。
     """
+
+    black_in: tuple[float, float] | None = None
+    black_out: float | None = None
+    layers: Sequence[tuple[str, str]] = ()
+
+    def empty(self) -> bool:
+        return self.black_in is None and self.black_out is None and not self.layers
+
+
+def _finishing(fin: Finish, cur: str, first: int, frames: int,
+               fps: int) -> tuple[list[str], list[str], str]:
+    """`cur` の映像に仕上げをかけるフィルタ：(足す入力の引数, フィルタの並び, 出口)。
+    重ねる PNG は `first` 番目の入力から。何も無ければ `cur` をそのまま返す。"""
+    if fin.empty():
+        return [], [], cur
     vf = []
-    if black_in is not None:
-        vf.append("fade=t=in:st=%.6f:d=%.6f" % black_in)
-    if black_out is not None:
-        vf.append("fade=t=out:st=%.6f:d=%.6f" % (frames / fps - black_out, black_out))
-    graph, cur = [], "[0:v]"
-    for i, (_png, y) in enumerate(layers, 1):
-        graph.append("%s[%d:v]overlay=x=0:y='%s':eval=frame[l%d]" % (cur, i, y, i))
+    if fin.black_in is not None:
+        vf.append("fade=t=in:st=%.6f:d=%.6f" % fin.black_in)
+    if fin.black_out is not None:
+        vf.append("fade=t=out:st=%.6f:d=%.6f" % (frames / fps - fin.black_out, fin.black_out))
+    # PNG は1回だけ読んで使い回す（`-loop 1` で毎フレーム読み直すと、1080p の2枚で
+    # 1フレーム約 50ms の CPU——書き出しと同じくらい——が余計にかかる）
+    graph = []
+    for i, (_png, y) in enumerate(fin.layers):
+        graph.append("[%d:v]format=yuva420p,loop=loop=-1:size=1:start=0[p%d];"
+                     "%s[p%d]overlay=x=0:y='%s':eval=frame[l%d]" % (first + i, i, cur, i, y, i))
         cur = "[l%d]" % i
-    graph.append("%s%s[out]" % (cur, ",".join(vf) or "null"))
-    inputs = [x for png, _y in layers for x in ("-loop", "1", "-framerate", str(fps), "-i", png)]
-    _ff("-i", src, *inputs, "-filter_complex", ";".join(graph), "-map", "[out]",
-        "-frames:v", str(frames), "-an", "-c:v", "libx264", "-crf", CRF,
-        "-pix_fmt", "yuv420p", dst)
+    graph.append("%s%s[fin]" % (cur, ",".join(vf) or "null"))
+    inputs = [x for png, _y in fin.layers for x in ("-i", png)]
+    return inputs, graph, "[fin]"
+
+
+def finish(src: str, dst: str, frames: int, fps: int,
+           black_in: tuple[float, float] | None = None,
+           black_out: float | None = None,
+           layers: Sequence[tuple[str, str]] = ()) -> str:
+    """つないだ1本に仕上げ（`Finish`）をかけて書き直す（音なし）。
+
+    つなぎ目を重ねる（`crossfade`）なら、そちらに `fin` で渡して1回の書き出しで済ませる。
+    """
+    more, graph, cur = _finishing(Finish(black_in, black_out, layers), "[0:v]", 1, frames, fps)
+    if not graph:
+        graph, cur = ["[0:v]null[fin]"], "[fin]"
+    _ff("-i", src, *more, "-filter_complex", ";".join(graph), "-map", cur,
+        "-frames:v", str(frames), "-an", *ENCODE, dst)
     return dst
 
 

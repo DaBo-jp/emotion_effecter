@@ -591,6 +591,12 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
 - 包絡が streaming の effect（arc / ring / line）は cymatics 側が区間依存なので、
   本編を割らずに1本で描く
 - 音は `-shortest` ではなく `-t` で切る（cymatics の README と同じ理由）
+- **曲ぜんたいを書き出すのは1回だけ。** つなぎ目を重ねる（`clip_xfade`）ときは、黒の
+  入り・落ちと crt の重ねも同じ ffmpeg の1回でかける（`video.Finish`）。1080p の x264
+  medium は1フレーム約 50ms の CPU で、絵を描くのと同じくらい重い。preset は medium の
+  まま（veryfast は CPU が半分だが、同じ crf で画質が目に見えて落ちる）
+- 重ねる PNG は1回だけ読んで使い回す（`-loop 1` の読み直しは2枚で1フレーム約 50ms）。
+  20秒の 1080p で、つなぎ・黒・crt の書き出しの CPU が 109 → 45秒。絵は前と画素まで同じ
 
 ## 開発
 
