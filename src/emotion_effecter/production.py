@@ -40,7 +40,6 @@ from . import crt as crt_mod
 from . import digest, drive, video
 from .overlay import Overlay
 from .policy import Policy
-from .roll import Roll
 from .scenes import Scenes
 from .timeline import Timeline
 
@@ -130,7 +129,7 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
             sources: Mapping[str, str | None] | None = None,
             scenes: Scenes | None = None,
             overlays: Sequence[Overlay] = (), fade: float = 0.0,
-            transition: str = "fade", roll: Roll | None = None,
+            transition: str = "fade", roll: drive.Lyrics | None = None,
             black: tuple[float, float] | None = None,
             black_out: float | None = None, crt: crt_mod.Crt | None = None) -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。

@@ -16,7 +16,8 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
   無ければ今までと同じ1枚の道を通る ∴ 画素は変わらない
 - 画面の色調（灰色・セピア）は層ではなく、重ね終えた画面に掛ける（cymatics の
   `finish`）。動かさない Policy なら `finish` を渡さない ∴ 画素は変わらない
-- 流れる歌詞（`roll.Roll`）も `finish` で、色調の**後に**描く（文字は染めない）
+- 歌詞（流れる `roll.Roll`、歌う行に合わせた `sing.Sing`）も `finish` で、色調の**後に**
+  描く（文字は染めない）
 """
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ from PIL import Image
 
 from . import grade
 from . import roll as roll_mod
+from . import sing as sing_mod
 from .overlay import Overlay
 from .policy import Look, Policy, look, tone, toned
 from .scenes import Scenes
@@ -179,7 +181,16 @@ def wrap_overlay(eff: effects.Effect, ov: Overlay, tl: Timeline | None) -> effec
     return _redrawn(eff, draw)
 
 
-def finisher(tl: Timeline | None, pol: Policy, rl: roll_mod.Roll | None = None, fps: int = 30):
+#: 画面に描く歌詞の配置
+type Lyrics = roll_mod.Roll | sing_mod.Sing
+
+
+def _lyrics_draw(rl: Lyrics):
+    """配置に合う描き方。"""
+    return sing_mod.draw if isinstance(rl, sing_mod.Sing) else roll_mod.draw
+
+
+def finisher(tl: Timeline | None, pol: Policy, rl: Lyrics | None = None, fps: int = 30):
     """重ね終えた画面の仕上げ（cymatics の `finish`）。色調 → 流れる歌詞の順。
     どちらも無ければ None。"""
     tint = tl is not None and toned(pol)
@@ -189,7 +200,7 @@ def finisher(tl: Timeline | None, pol: Policy, rl: roll_mod.Roll | None = None, 
 
     def finish(img, f):
         img = grade.apply(img, *tone(tl.frame(f), pol)) if tint else img
-        return img if rl is None else roll_mod.draw(img, f / fps, rl, blocks)
+        return img if rl is None else _lyrics_draw(rl)(img, f / fps, rl, blocks)
 
     return finish
 
@@ -231,7 +242,7 @@ def _stacked(main: effects.Effect, s: Mapping[str, Any], ovs: Sequence[Overlay],
 
 def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
            pol: Policy = Policy(), sc: Scenes | None = None,
-           ovs: Sequence[Overlay] = (), rl: roll_mod.Roll | None = None):
+           ovs: Sequence[Overlay] = (), rl: Lyrics | None = None):
     """平らな Spec 1つで書き出す。`tl=None` かつ `sc=None` で重ねる層が無ければ
     素の cymatics と同じ。
 
@@ -282,7 +293,7 @@ def _render_chunk(job) -> str:
 def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
                   chunks: list[Chunk], pol: Policy = Policy(), jobs: int = 0,
                   sc: Scenes | None = None, ovs: Sequence[Overlay] = (),
-                  rl: roll_mod.Roll | None = None) -> list[str]:
+                  rl: Lyrics | None = None) -> list[str]:
     """区間ごとに並列で書き出す（音なし）。戻り値は区間の動画、順番どおり。
 
     precomputed の包絡は初回にキャッシュへ書かれるので、先に1枚描いて温めておく

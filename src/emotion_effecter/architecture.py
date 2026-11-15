@@ -31,6 +31,9 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "digest": 0,          # ファイルの中身のハッシュ
     "jev": 0,             # Jev の呼び方と応答の読み方。質問は持たない
 
+    # 5 — 歌詞の行の時刻（lines.json）
+    "lines": 5,
+
     # 10 — 次元や歌詞を使う判断。互いに知らない
     "policy": 10,         # 感情 → 見た目。描画を知らない
     "mood": 10,           # lyrics → Jev（区間ごとの感情）
@@ -50,6 +53,9 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "roll": 10,           # 歌詞をエンドロールのように流す
     "crt": 10,            # ブラウン管の走査線と明るい帯（重ねる絵と位置の式）
 
+    # 15 — 歌っている行に合わせた歌詞（カラオケの帯・縦書き）。フォントは roll の探し方
+    "sing": 15,
+
     # 20 — 判断を束ねる。互いに知らない
     "manifest": 20,       # song.json（曲の宣言）。policy で写像を検証する
     "timeline": 20,       # 採点を時間に敷く
@@ -67,6 +73,12 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     # 50 — 1曲を最初から最後まで
     "workflow": 50,
     "liveflow": 50,       # ライブ動画1本を最初から最後まで。workflow とは互いに知らない
+
+    # 55 — 手元の UI から呼ぶ操作（HTTP を知らない）
+    "desk": 55,
+
+    # 57 — 手元の UI の HTTP の口
+    "ui": 57,
 
     # 60 — 入口。互いに知らない
     "cli": 60,

@@ -51,6 +51,7 @@ from . import (
     dims,
     drive,
     elements,
+    lines,
     lyrics,
     mood,
     pace,
@@ -61,6 +62,7 @@ from . import (
     roll,
     scenery,
     scenes,
+    sing,
     structure,
     sync,
     tempo,
@@ -90,6 +92,7 @@ NAMES: Mapping[str, str] = MappingProxyType({
     "base": "base.mp4", "compare": "compare.mp4", "previews": "previews.png",
     "elements": "elements.json", "suggest": "suggest.md", "pace": "pace.json",
     "audience": "audience.json", "backdrop": "backdrop.mp4", "scenery": "scenery",
+    "lines": "lines.json",
 })
 
 
@@ -298,19 +301,39 @@ def backdrop_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
     return o["backdrop"]
 
 
-def base_look(m: Manifest, sc: scenes.Scenes, image: str, rl: roll.Roll | None = None
-              ) -> tuple[scenes.Scenes | None, str, roll.Roll | None]:
+def base_look(m: Manifest, sc: scenes.Scenes, image: str, rl: drive.Lyrics | None = None
+              ) -> tuple[scenes.Scenes | None, str, drive.Lyrics | None]:
     """base に使う (Scenes, 背景, 流れる歌詞)。`base_plain` なら素の cymatics
     （振り付けも歌詞も無し・元の画像）。"""
     return (None, m.file("image"), None) if m.base_plain else (sc, image, rl)
 
 
+def line_starts(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> list[list[float]]:
+    """行の歌い出し。タイムラインで置いた lines.json、無ければ文字数で振り分けた仮置き。"""
+    if Path(o["lines"]).exists():
+        return lines.load(o["lines"], song)
+    say("lines: 行の時刻が無いので文字数で振り分ける（タイムラインで置くと合う）")
+    return lines.spread(song, audio.duration(m.file("audio")))
+
+
+def sung_of(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> sing.Sing:
+    """歌う行に合わせた歌詞（karaoke / vertical）の配置。"""
+    dur = audio.duration(m.file("audio"))
+    ends = [s.start for s in song.sections[1:]] + [dur]
+    spans = tuple((s.start, e) for s, e in zip(song.sections, ends))
+    rows = lines.build(song, line_starts(m, o, song, say), dur)
+    return sing.layout(rows, spans, size_of(m), m.credits, m.root)
+
+
 def credits_of(m: Manifest, o: Outputs, song: lyrics.Song, redo: Iterable[str],
-               say: Say) -> roll.Roll | None:
-    """流れる歌詞の配置。song.json に `credits` が無ければ None。`credits.pace` なら
-    気持ちの速さ（Jev、pace.json）と BPM（`credits.bpm` → `tempo.bpm` → 推定）も渡す。"""
+               say: Say) -> roll.Roll | sing.Sing | None:
+    """歌詞の配置。song.json に `credits` が無ければ None。`mode` が karaoke / vertical
+    なら歌う行に合わせる（`sung_of`）。`credits.pace` なら気持ちの速さ（Jev、pace.json）と
+    BPM（`credits.bpm` → `tempo.bpm` → 推定）も渡す。"""
     if m.credits is None:
         return None
+    if m.credits.get("mode") in sing.MODES:
+        return sung_of(m, o, song, say)
     paced = bool(m.credits.get("pace"))
     probs = [None if p is None else dict(p.probabilities)
              for p in timeline.align(song, paces(m, o, redo, say), "気持ちの速さ")] \
@@ -395,7 +418,7 @@ def black_of(m: Manifest, song: lyrics.Song) -> tuple[float, float] | None:
 
 def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
             jobs: int = 0, sc: scenes.Scenes | None = None, image: str | None = None,
-            rl: roll.Roll | None = None,
+            rl: drive.Lyrics | None = None,
             black: tuple[float, float] | None = None) -> None:
     """`black` は黒からの入り（`black_of`）。黒への落ちは `m.fade_out` から。"""
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image")}
@@ -420,7 +443,7 @@ def compare(m: Manifest, o: Outputs, say: Say) -> None:
 
 def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str,
           sc: scenes.Scenes | None = None, image: str | None = None,
-          rl: roll.Roll | None = None) -> str:
+          rl: drive.Lyrics | None = None) -> str:
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image"),
               "out": png + ".mp4", "preview": png, "preview_at": t}
     drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc, m.overlays, rl)

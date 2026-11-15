@@ -8,6 +8,7 @@
     render    1回の書き出し（--preview で1枚）
     produce   公開版と同じ三段（Opening / 本編 / Closing）の1本。本編は並列
     compare   2本を上下に並べた1本
+    ui        手元の画面をブラウザで開く（song.json・タイムライン・書き出し）
 
 入口でやるのは引数の解釈と、下の層の呼び出しだけ。値の検証は下の層の宣言から
 出る（Spec は cymatics の Field、Policy は `policy.RANGES`）。
@@ -148,6 +149,12 @@ def cmd_suggest(a: argparse.Namespace) -> None:
             for s, cur in zip(ranked[:a.top], now))))
 
 
+def cmd_ui(a: argparse.Namespace) -> None:
+    from . import ui
+
+    ui.serve(Path(a.data), Path(a.out), a.port)
+
+
 # ----------------------------------------------------------------- 引数
 def _add_song(sub) -> None:
     from .workflow import REDO, STEPS
@@ -243,12 +250,20 @@ def _add_compare(sub) -> None:
     p.set_defaults(fn=cmd_compare)
 
 
+def _add_ui(sub) -> None:
+    p = sub.add_parser("ui", help="手元の画面（song.json・タイムライン・書き出し）をブラウザで開く")
+    p.add_argument("--data", default="music_data", help="曲のディレクトリの親")
+    p.add_argument("--out", default="out", help="出力の親（その下に曲名）")
+    p.add_argument("--port", type=int, default=8765)
+    p.set_defaults(fn=cmd_ui)
+
+
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="emotion-effecter", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for add in (_add_song, _add_live, _add_suggest, _add_score, _add_sections, _add_render,
-                _add_produce, _add_compare):
+                _add_produce, _add_compare, _add_ui):
         add(sub)
     return ap
 

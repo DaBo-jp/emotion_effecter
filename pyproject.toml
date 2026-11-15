@@ -7,7 +7,9 @@ license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
     "cymatics",
+    "fastapi>=0.162.7",
     "typesafe-sdk>=0.7.5",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -22,6 +24,7 @@ cymatics = { git = "https://github.com/DaBo-jp/cymatics.git", rev = "10763e7be77
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]

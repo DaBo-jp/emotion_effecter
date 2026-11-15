@@ -16,7 +16,9 @@
       "clip_xfade": 0.3,                    ← Opening / Closing と本編のつなぎ目の
                                               クロスフェード（秒）。書かなければ切り替え
       "credits": {"position": "right", "band": "20,20,30"},
-                                            ← 歌詞をエンドロールのように流す（`roll.py`）
+                                            ← 歌詞をエンドロールのように流す（`roll.py`）。
+                                              "mode": "karaoke" / "vertical" で歌っている行に
+                                              合わせた横の帯・縦書き（`sing.py`）
       "clip_transition": "fadewhite",       ← その切り替え方（`video.TRANSITIONS`）。
                                               書かなければ重ねて入れ替える fade
       "fade_in": {"after": "Intro", "seconds": 2},
@@ -63,6 +65,7 @@ from . import policy as policy_mod
 from . import reel as reel_mod
 from . import roll as roll_mod
 from . import scenes as scenes_mod
+from . import sing as sing_mod
 from . import tempo as tempo_mod
 from .doc import notes_dropped
 
@@ -189,6 +192,13 @@ def _audience_problems(doc: Mapping[str, Any]) -> list[str]:
     return bad + (["audience を書いたのに files.audience が無い"] if cfg else [])
 
 
+def _credits_problems(cfg: Any, root: Path) -> list[str]:
+    """`credits` の書き方。`mode` が karaoke / vertical なら `sing`、それ以外は `roll`。"""
+    if isinstance(cfg, Mapping) and cfg.get("mode") in sing_mod.MODES:
+        return sing_mod.problems(cfg, root)
+    return roll_mod.problems(cfg, root)
+
+
 def _fade_in_problems(doc: Mapping[str, Any]) -> list[str]:
     """`fade_in` の書き方。Opening と一緒には使えない（どちらも頭の入り方）。"""
     if "fade_in" not in doc:
@@ -261,7 +271,7 @@ def problems(doc: Mapping[str, Any], root: Path) -> list[str]:
     xf = doc.get("clip_xfade", 0.0)
     bad += [] if isinstance(xf, (int, float)) and not isinstance(xf, bool) and xf >= 0 else [
         "clip_xfade は 0 以上の秒数"]
-    bad += roll_mod.problems(doc["credits"], root) if "credits" in doc else []
+    bad += _credits_problems(doc["credits"], root) if "credits" in doc else []
     bad += [] if doc.get("clip_transition", "fade") in video.TRANSITIONS else [
         "clip_transition=%r は知らない切り替え（%s など）"
         % (doc.get("clip_transition"), " / ".join(video.TRANSITIONS[:4]))]

@@ -34,6 +34,26 @@ Architecture（2026-10）: 軸は受容ではなく主導権
 Python 3.14+ と ffmpeg。歌詞を流す（`credits`）なら fontconfig と日本語フォント（Debian なら
 `fonts-noto-cjk`）。`TYPESAFE_API_KEY` を `.env` に置く（.gitignore 済み）。
 
+### 手元の画面
+
+```
+uv run --env-file .env emotion-effecter ui        → http://127.0.0.1:8765 をブラウザで
+```
+
+- **設定**: song.json をフォームで書く。書いたそばから検証して問題を全部並べる
+  （`_note` は残る）。込み入った項目（policy / overlays / reel など）は JSON の欄
+- **タイムライン**: 波形と拍の上にセクションの切れ目を置く。歌詞の `[ ]` の行が
+  セクション。「自動で置く」は `sections` と同じ推定で、自信の無い境界に印が付く。
+  印をドラッグ（拍に吸着、Shift で外す）、再生しながら `M` で今の位置に置いて次へ。
+  保存先は `out/<曲>/lyrics.timed.md`（歌詞に時刻を手で書いてあれば、その歌詞）。
+  「行」に切り替えると、行ごとの歌い出しを同じやり方で置ける（`out/<曲>/lines.json`、
+  `credits` の karaoke / vertical が使う）
+- **書き出し**: プレビュー（previews.png）か書き出しを子プロセスで回し、記録
+  （`out/<曲>/ui-job.log`）と出来上がりをその場で見る。止められる
+
+自分の PC で開くためのもの（127.0.0.1 だけで待つ）。中身は `desk.py`（操作）と
+`ui.py`（HTTP の口）で、判断は今のモジュールに任せる。
+
 **入力と出力は曲ごとのディレクトリ。**
 
 ```
@@ -212,6 +232,29 @@ out/<曲>/                   出力。全部作り直せるもの
   **フォントは OS の場所を前提にしない**——頼んだファミリーと太さが fontconfig から返らな
   ければ断る（似たものを黙って使わない）。コンテナ（Debian）には `fontconfig` と
   `fonts-noto-cjk` を入れる
+- `credits` の `mode` を `karaoke` / `vertical` にすると、**歌詞を2行だけ、行の単位で
+  歌に合わせて**出す（`sing.py`）。行は交互の段（列）に置き、前の行を歌い始めたところで
+  次の行として出て、自分の次の行を歌い始めるまで残る ∴ いつも「いま歌っている行」と
+  「次の行」の2行。置いた行は動かない。セクションの頭の行は `lead` 秒前に出る。文字の
+  色は変えない。行の歌い出しは `out/<曲>/lines.json`——手元の画面のタイムラインの「行」で、
+  再生しながら `M` で置く。置いていなければ、セクションの長さを行の文字数で振り分けた
+  仮置き（頭は合うが中の行は目安）。歌詞が変わると lines.json は読まない（置き直す）
+
+  ```json
+  "credits": {"mode": "karaoke", "position": "bottom"}
+  "credits": {"mode": "vertical", "position": "right"}
+  ```
+
+  | 項目 | 値 |
+  |---|---|
+  | `mode` | `karaoke`：横の帯に2段。`vertical`：縦書きで2列（右の列から読む） |
+  | `position` | karaoke は `bottom`（既定）/ `top`。vertical は `right`（既定）/ `left` |
+  | `lead` / `fade` | セクションの頭の行を歌い出しの何秒前から出すか / 浮かぶ・消える秒数 |
+  | `color` / `band` / `band_alpha` / `font` / `weight` / `size` / `margin` / `line` | 文字の色、帯の色と不透明度、フォント（`roll` と同じ探し方。既定は Bold）、文字の高さ・端からの余白（画面の高さに対する比）、段・列の送り |
+
+  段（列）に収まらない長い行は縮めて収める。縦書きは縦の字形（句読点・括弧・長音が縦に
+  なる）。**欧文（かなも漢字も無い区間）は横倒し**にする——日本語と混ざった行は区間ごとに、
+  日本語は縦、欧文は横倒しで上から積む
 - `"clip_xfade": 0.3` で **Opening / Closing と本編のつなぎ目をクロスフェード**にする（秒）。
   曲の尺も切れ目も変わらない——Opening の最後の 0.3 秒に本編を重ねながら入り、Closing の
   最初の 0.3 秒で本編から移る（重なるぶん本編を前後に余分に描く）。書かなければ切り替え
@@ -353,14 +396,18 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 
 ```
   0  architecture / dims / lyrics / beats / video / grade / doc / digest / jev
+ 5   lines                        ← 歌詞の行の時刻
  10  policy / mood / elements / pace / tempo / casting / structure / scenes / overlay
      sync / windows / audience / scenery / backdrop / reel / roll / crt
                                   ← 互いに知らない
+ 15  sing                         ← 歌う行に合わせた歌詞。フォントは roll の探し方
  20  manifest / timeline / placement
  25  livefile
  30  drive                        ← cymatics の描画とつなぐのはここだけ
  40  production
  50  workflow / liveflow          ← 互いに知らない
+ 55  desk                         ← 手元の画面から呼ぶ操作。HTTP を知らない
+ 57  ui                           ← 手元の画面の HTTP の口
  60  cli / emotion_effecter
  70  __main__
 ```
@@ -406,6 +453,10 @@ reel        背景の区間の並び（mp4 / 画像）→ 背景の動画
 roll        歌詞をエンドロール / クレジットのように流す
 grade       画面ぜんたいの色調（灰色・セピア）
 crt         ブラウン管の走査線と、上下へ流れる明るい帯
+lines       歌詞の行ごとの歌い出し（lines.json）。無ければ文字数で振り分け
+sing        歌詞を2行だけ、行の単位で歌に合わせて出す（横の帯・縦書き）
+desk        手元の画面から呼ぶ操作（曲の一覧・検証・タイムライン・書き出しの仕事）
+ui          手元の画面の HTTP の口（ui.html の1枚）
 timeline    採点 → 毎フレームの感情曲線
 policy      感情 → 見た目。**写像はここだけ**。cymatics を知らない純粋な計算
 drive       cymatics の effect の draw() を包んで動かす。区間ごとの並列書き出し
