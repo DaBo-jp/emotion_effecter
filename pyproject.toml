@@ -20,7 +20,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv.sources]
-cymatics = { git = "https://github.com/DaBo-jp/cymatics.git", rev = "9c05c9a82fe624adc977cfc921424a4a784e14ef" }
+cymatics = { git = "https://github.com/DaBo-jp/cymatics.git", rev = "8d2a63db41f513d966af73128c99e4153399dabb" }
 
 [dependency-groups]
 dev = [
