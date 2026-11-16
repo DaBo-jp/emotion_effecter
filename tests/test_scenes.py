@@ -279,15 +279,29 @@ def test_the_boundary_draws_both_flows(media):
     assert not np.array_equal(mid, old) and not np.array_equal(mid, new)
 
 
+class _Env:
+    """cymatics の包絡のうち `stage()` が読むものだけ（曲ぜんたいのバンドレベル）。"""
+
+    def all_levels(self):
+        return np.zeros((4, 16), np.float32)
+
+
 @dataclass(frozen=True)
 class _Ctx:
-    """cymatics の Ctx のうち `variant()` が読むものだけ。"""
+    """cymatics の Ctx のうち `variant()` と `stage()` が読むものだけ。"""
 
     s: dict
     derived: dict = field(default_factory=dict)
     work: object = None
     w: int = 320
     h: int = 180
+    alpha: float = 1.0
+    env: object = field(default_factory=_Env, compare=False)
+
+    @property
+    def d(self):
+        """本物の Ctx と同じく、導出値の別名。"""
+        return self.derived
 
 
 def test_variant_rebuilds_stage_for_the_new_flow():
