@@ -131,41 +131,108 @@ def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
                            os.path.join(tmp, "video.mp4"), transition, fin)
 
 
-def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: str, *,
-            opening: str | None = None, closing: str | None = None,
-            pol: Policy = Policy(), jobs: int = 0, chunk_seconds: int = CHUNK_SECONDS,
-            sources: Mapping[str, str | None] | None = None,
-            scenes: Scenes | None = None,
-            overlays: Sequence[Overlay] = (), fade: float = 0.0,
-            transition: str = "fade", roll: drive.Lyrics | None = None,
-            black: tuple[float, float] | None = None,
-            black_out: float | None = None, crt: crt_mod.Crt | None = None) -> dict[str, Any]:
-    """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
-    `fade` はつなぎ目のクロスフェード（秒）、`transition` はその切り替え方、
-    `black` / `black_out` は黒からの入り（開始秒, 秒数）と黒への落ち（秒数）、
-    `crt` はブラウン管の走査線と明るい帯（画面ぜんたいに重ねる）。"""
-    pol.check()
-    if transition not in video.TRANSITIONS:
-        raise ValueError("知らない切り替え: %s" % transition)
-    spec = effects.get(effect).spec_from(**{**params, "out": out})
-    c = cut(spec["audio"], int(spec["fps"]), opening, closing, fade)
+@dataclass(frozen=True)
+class Order:
+    """1本の書き出しの注文。**区間に分けても通しでも同じ注文を使う**（Cloud Run Jobs の
+    各タスクが同じ注文から同じ区間を出せるように）。"""
+
+    effect: str
+    params: Mapping[str, Any]
+    tl: Timeline | None = None
+    opening: str | None = None
+    closing: str | None = None
+    pol: Policy = Policy()
+    chunk_seconds: int = CHUNK_SECONDS
+    sources: Mapping[str, str | None] | None = None
+    scenes: Scenes | None = None
+    overlays: Sequence[Overlay] = ()
+    #: つなぎ目のクロスフェード（秒）とその切り替え方
+    fade: float = 0.0
+    transition: str = "fade"
+    roll: drive.Lyrics | None = None
+    #: 黒からの入り（開始秒, 秒数）と黒への落ち（秒数）
+    black: tuple[float, float] | None = None
+    black_out: float | None = None
+    #: ブラウン管の走査線と明るい帯（画面ぜんたいに重ねる）
+    crt: crt_mod.Crt | None = None
+
+    def check(self) -> None:
+        self.pol.check()
+        if self.transition not in video.TRANSITIONS:
+            raise ValueError("知らない切り替え: %s" % self.transition)
+
+
+@dataclass(frozen=True)
+class Plan:
+    """注文から決まる書き出しの段取り。区間の動画は `workdir` に置く。"""
+
+    spec: Mapping[str, Any]
+    cut: Cut
+    chunks: tuple[drive.Chunk, ...]
+
+
+def plan(order: Order, out: str, workdir: str) -> Plan:
+    """注文 → 段取り。同じ注文と同じ入力なら、どこで計算しても同じ区間になる。"""
+    order.check()
+    spec = effects.get(order.effect).spec_from(**{**order.params, "out": out})
+    c = cut(spec["audio"], int(spec["fps"]), order.opening, order.closing, order.fade)
     f0, f1 = c.drawn()
-    size = chunk_seconds * c.fps if drive.chunk_safe(effect, overlays) else f1 - f0
+    safe = drive.chunk_safe(order.effect, order.overlays)
+    size = order.chunk_seconds * c.fps if safe else f1 - f0
+    return Plan(spec, c, tuple(drive.plan_chunks(f0, f1, size, workdir)))
+
+
+def draw(order: Order, p: Plan, which: Sequence[int], jobs: int = 0) -> list[str]:
+    """段取りの区間のうち `which`（番号）だけを描く。戻り値は描いた区間の動画。"""
+    chosen = [p.chunks[i] for i in which]
+    if not chosen:
+        return []
+    return drive.render_chunks(order.effect, p.spec, order.tl, chosen, order.pol, jobs,
+                               order.scenes, order.overlays, order.roll)
+
+
+def finish(order: Order, p: Plan, parts: Sequence[str], out: str) -> dict[str, Any]:
+    """描いた区間（順番どおり）をつなぎ、仕上げと音を乗せて out に書く。隣に再現の記録。"""
+    spec, c = p.spec, p.cut
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
-        chunks = drive.plan_chunks(f0, f1, size, tmp)
-        parts = drive.render_chunks(effect, spec, tl, chunks, pol, jobs, scenes, overlays, roll)
-        lays = crt_mod.layers(crt, (int(spec["width"]), int(spec["height"])), tmp) \
-            if crt is not None else []
-        silent = _assemble(parts, c, opening, closing, tmp, transition,
-                           video.Finish(black, black_out, tuple(lays)))
+        lays = crt_mod.layers(order.crt, (int(spec["width"]), int(spec["height"])), tmp) \
+            if order.crt is not None else []
+        silent = _assemble(list(parts), c, order.opening, order.closing, tmp,
+                           order.transition,
+                           video.Finish(order.black, order.black_out, tuple(lays)))
         video.mux(silent, spec["audio"], out, c.total / c.fps)
-    src = {"audio": spec["audio"], "image": spec["image"], "opening": opening,
-           "closing": closing, **(sources or {})}
-    rec = record(spec, pol, c, chunks, src, tl is not None, scenes, overlays)
-    rec["transition"] = transition if c.fade else None
-    rec["credits"] = dict(roll.cfg) if roll is not None else None
-    rec["black"] = {"in": list(black) if black is not None else None, "out": black_out}
-    rec["crt"] = crt.to_dict() if crt is not None else None
+    rec = _recorded(order, p)
     with open(out + ".plan.json", "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=2)
     return rec
+
+
+def _recorded(order: Order, p: Plan) -> dict[str, Any]:
+    spec, c = p.spec, p.cut
+    src = {"audio": spec["audio"], "image": spec["image"], "opening": order.opening,
+           "closing": order.closing, **(order.sources or {})}
+    rec = record(spec, order.pol, c, list(p.chunks), src, order.tl is not None, order.scenes,
+                 order.overlays)
+    rec["transition"] = order.transition if c.fade else None
+    rec["credits"] = dict(order.roll.cfg) if order.roll is not None else None
+    rec["black"] = {"in": list(order.black) if order.black is not None else None,
+                    "out": order.black_out}
+    rec["crt"] = order.crt.to_dict() if order.crt is not None else None
+    return rec
+
+
+def run(order: Order, out: str, jobs: int = 0) -> dict[str, Any]:
+    """注文を通しで: 段取り → 全部の区間を並列に描く → つなぐ。戻り値は再現の記録。"""
+    order.check()
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(out))) as tmp:
+        p = plan(order, out, tmp)
+        parts = draw(order, p, range(len(p.chunks)), jobs)
+        return finish(order, p, parts, out)
+
+
+def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: str, *,
+            jobs: int = 0, **options: Any) -> dict[str, Any]:
+    """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
+    `options` は `Order` の項目（opening / closing / pol / fade / transition / roll /
+    black / black_out / crt / chunk_seconds / sources / scenes / overlays）。"""
+    return run(Order(effect, params, tl, **options), out, jobs)

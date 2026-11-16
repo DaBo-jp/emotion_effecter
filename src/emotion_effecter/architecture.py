@@ -74,6 +74,9 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "workflow": 50,
     "liveflow": 50,       # ライブ動画1本を最初から最後まで。workflow とは互いに知らない
 
+    # 52 — 1曲を Cloud Run Jobs の3段（prepare / render / finalize）に割る
+    "job": 52,
+
     # 55 — 手元の UI から呼ぶ操作（HTTP を知らない）
     "desk": 55,
 

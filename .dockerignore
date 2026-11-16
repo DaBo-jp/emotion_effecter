@@ -1,0 +1,8 @@
+# イメージに入れるのは pyproject.toml / uv.lock / README.md / LICENSE / src だけ
+*
+!pyproject.toml
+!uv.lock
+!README.md
+!LICENSE
+!src/
+src/**/__pycache__/

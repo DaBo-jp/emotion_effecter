@@ -1,6 +1,7 @@
 """コマンドの入口。
 
     song      1曲を最初から最後まで（入力 music_data/<曲>/ → 出力 out/<曲>/）
+    job       song を Cloud Run Jobs の3段（prepare / render / finalize）に割ったもの
     live      ライブ動画1本に、盛り上がり（Jev）に合わせたエフェクトを重ねる
     suggest   歌詞の属性（水地風金火明暗）と BPM → effect の候補
     score     歌詞 → セクションごとの感情（Jev）
@@ -127,6 +128,21 @@ def cmd_song(a: argparse.Namespace) -> None:
     workflow.run(m, out, steps=a.steps, redo=a.redo, jobs=a.jobs)
 
 
+def cmd_job(a: argparse.Namespace) -> None:
+    import os
+
+    from . import job, manifest
+
+    m = manifest.load(a.dir)
+    out = a.out or str(Path("out") / Path(a.dir).resolve().name)
+    if a.stage == "prepare":
+        job.prepare(m, out)
+    elif a.stage == "render":
+        job.render(m, out, job.Task.from_env(os.environ), a.jobs)
+    else:
+        job.finalize(m, out)
+
+
 def cmd_live(a: argparse.Namespace) -> None:
     from . import livefile, liveflow
 
@@ -183,6 +199,17 @@ def _add_live(sub) -> None:
                    help="出力があってもやり直す工程（score は盛り上がりの採点）")
     p.add_argument("--jobs", type=int, default=0)
     p.set_defaults(fn=cmd_live)
+
+
+def _add_job(sub) -> None:
+    p = sub.add_parser("job", help="song を Cloud Run Jobs の3段に割ったもの",
+                       description="render のタスクの番号と数は CLOUD_RUN_TASK_INDEX / "
+                                   "CLOUD_RUN_TASK_COUNT（無ければ 0 / 1）")
+    p.add_argument("stage", choices=("prepare", "render", "finalize"))
+    p.add_argument("dir", help="入力ディレクトリ（song.json がある）")
+    p.add_argument("--out", help="出力ディレクトリ（タスクどうしで共有）。既定は out/<曲>")
+    p.add_argument("--jobs", type=int, default=0, help="タスクの中の並列数。0=区間の数と CPU")
+    p.set_defaults(fn=cmd_job)
 
 
 def _add_suggest(sub) -> None:
@@ -262,8 +289,8 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="emotion-effecter", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for add in (_add_song, _add_live, _add_suggest, _add_score, _add_sections, _add_render,
-                _add_produce, _add_compare, _add_ui):
+    for add in (_add_song, _add_job, _add_live, _add_suggest, _add_score, _add_sections,
+                _add_render, _add_produce, _add_compare, _add_ui):
         add(sub)
     return ap
 

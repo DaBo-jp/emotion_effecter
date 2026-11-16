@@ -474,6 +474,7 @@ video       ffmpeg でつなぐ・揃える・並べる
 production  本編を並列に描き、Opening / Closing とつなぎ、黒の入り・落ちと音を乗せる
 manifest    song.json（曲の宣言）を読んで検証する
 workflow    1曲を最初から最後まで
+job         workflow を Cloud Run Jobs の3段（prepare / render / finalize）に割る
 windows     歌詞の無いライブ動画を小節で区切る
 livefile    live.json（ライブ動画1本の宣言）を読んで検証する
 liveflow    ライブ動画1本を最初から最後まで
@@ -612,6 +613,47 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
   cymatics の `render.channel`（C++、無ければ numpy）で同じ式を描き、ffv1 の短い動画に
   してつなぐ。15フレームのつなぎ目1つで CPU 80 → 11秒。素材が短くてつなぎ目どうしが
   重なるときだけ数式で描く
+
+### Cloud Run Jobs の3段（`job`）とコンテナ
+
+`song` と同じことを、タスクに分けて回せる3段に割ったもの。**3段に割っても通しと
+1フレームずつ同じ絵になる**（`tests/test_job.py`）。
+
+```
+emotion-effecter job prepare  music_data/<曲> --out out/<曲>   tasks=1
+emotion-effecter job render   music_data/<曲> --out out/<曲>   tasks=N
+emotion-effecter job finalize music_data/<曲> --out out/<曲>   tasks=1
+```
+
+| 段 | すること |
+|---|---|
+| prepare | Jev への質問（採点・速さ・聴衆・キー画像）、セクションの時刻、背景の動画。書き出す本と区間の数を `out/<曲>/job/plan.json` に |
+| render | `CLOUD_RUN_TASK_INDEX` 番目のタスクが、区間の通し番号（emotion と base をまたぐ）i で i % `CLOUD_RUN_TASK_COUNT` == index のものを描いて `job/<役割>/` に置く |
+| finalize | 区間をつなぎ、Opening / Closing・仕上げ・音を乗せる。compare も。終われば `job/` を消す |
+
+- **出力のディレクトリはタスクどうしで共有する**（Cloud Storage をボリュームで差す想定）。
+  区間はタスクの手元に描き、書き終えてから共有の場所へ写す
+- **render と finalize は Jev を呼ばない**（`jev.OFFLINE`）。prepare の残した出力が
+  無ければ断る ∴ 鍵（`TYPESAFE_API_KEY`）は prepare にだけ渡す
+- どの段も同じ注文（`workflow.targets` → `production.Order`）から同じ区間を出す。
+  prepare の数え（本と区間の数）と違えば断る
+- 入力のディレクトリには書かない（読み取りだけで差せる）
+
+コンテナ（`Dockerfile`）。cymatics は非公開 ∴ GitHub のトークンを BuildKit の secret で
+渡す（どの層にも残らない）:
+
+```
+GITHUB_TOKEN=$(gh auth token) docker build --secret id=github_token,env=GITHUB_TOKEN \
+    -t emotion-effecter .
+docker run --rm -v $PWD/music_data:/data/in:ro -v $PWD/out:/data/out --env-file .env \
+    emotion-effecter job prepare /data/in/<曲> --out /data/out/<曲>
+docker run --rm -v $PWD/music_data:/data/in:ro -v $PWD/out:/data/out \
+    -e CLOUD_RUN_TASK_INDEX=0 -e CLOUD_RUN_TASK_COUNT=1 \
+    emotion-effecter job render /data/in/<曲> --out /data/out/<曲>
+```
+
+C++ の部品（cymatics `_native`）が入っていなければ断る（`CYMATICS_BACKEND=cpp`。
+CPU 秒で課金されるので、黙って遅い Python で回さない）。
 
 ## 開発
 

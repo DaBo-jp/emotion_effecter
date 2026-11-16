@@ -6,11 +6,13 @@
 - `level()` — Score の期待値を 0..1 に。段階は 0 から数えるので最上段で割る
 - `scores()` — Score の応答を (0..1 の値, confidence, 分布) に
 - `run()` — 非同期のクライアントを開いて1回の仕事を回す同期版。`TYPESAFE_API_KEY` を
-  環境変数から読む
+  環境変数から読む。`EMOTION_EFFECTER_OFFLINE` が立っていれば呼ばずに断る（Cloud Run
+  Jobs の render / finalize。Jev への質問は prepare で済んでいるはず）
 """
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
@@ -32,8 +34,19 @@ def scores(answers: Mapping[str, Any]
     return vals, conf, dist
 
 
+#: これが立っていれば Jev を呼ばない（呼ぼうとしたら断る）
+OFFLINE = "EMOTION_EFFECTER_OFFLINE"
+
+
+class Offline(RuntimeError):
+    """Jev を呼ばない段で、Jev への質問が要った（出力が残っていない）。"""
+
+
 def run[T](job: Callable[[AsyncTypeSafeClient], Awaitable[T]]) -> T:
     """`job(client)` を回す同期版。クライアントは1回ぶん開いて閉じる。"""
+    if os.environ.get(OFFLINE):
+        raise Offline("Jev を呼ばない段（%s）で Jev への質問が要った——前の段の出力"
+                      "（mood.json など）が無い" % OFFLINE)
     async def go() -> T:
         async with AsyncTypeSafeClient() as client:
             return await job(client)

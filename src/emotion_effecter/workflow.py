@@ -416,22 +416,52 @@ def black_of(m: Manifest, song: lyrics.Song) -> tuple[float, float] | None:
     return float(end), float(m.fade_in["seconds"])
 
 
-def produce(m: Manifest, out: str, tl: timeline.Timeline | None, o: Outputs,
-            jobs: int = 0, sc: scenes.Scenes | None = None, image: str | None = None,
-            rl: drive.Lyrics | None = None,
-            black: tuple[float, float] | None = None) -> None:
-    """`black` は黒からの入り（`black_of`）。黒への落ちは `m.fade_out` から。"""
+def order(m: Manifest, tl: timeline.Timeline | None, o: Outputs,
+          sc: scenes.Scenes | None = None, image: str | None = None,
+          rl: drive.Lyrics | None = None,
+          black: tuple[float, float] | None = None) -> production.Order:
+    """1本の書き出しの注文。`black` は黒からの入り（`black_of`）。黒への落ちは
+    `m.fade_out` から。"""
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image")}
     heard = tl is not None and m.file("audience") is not None
     sources = {"lyrics": m.file("lyrics"), "mood": o["mood"] if tl else None,
                "manifest": str(m.root / "song.json"),
                "audience": m.file("audience") if heard else None,
                "cheers": o["audience"] if heard else None}
-    production.produce(m.effect, params, tl, out, opening=m.file("opening"),
-                       closing=m.file("closing"), pol=policy.from_mapping(m.policy),
-                       jobs=jobs, sources=sources, scenes=sc, overlays=m.overlays,
-                       fade=m.clip_xfade, transition=m.clip_transition, roll=rl,
-                       black=black, black_out=m.fade_out, crt=m.crt)
+    return production.Order(m.effect, params, tl, opening=m.file("opening"),
+                            closing=m.file("closing"), pol=policy.from_mapping(m.policy),
+                            sources=sources, scenes=sc, overlays=m.overlays,
+                            fade=m.clip_xfade, transition=m.clip_transition, roll=rl,
+                            black=black, black_out=m.fade_out, crt=m.crt)
+
+
+@dataclass(frozen=True)
+class Target:
+    """書き出す1本: 出力の役割（`emotion` / `base`）、書く先、注文。"""
+
+    role: str
+    out: str
+    order: production.Order
+
+
+def targets(m: Manifest, o: Outputs, steps: Iterable[str], redo: Iterable[str],
+            say: Say) -> list[Target]:
+    """書き出す本と注文。**Jev への質問はここで全部済む**（採点・速さ・聴衆・キー画像。
+    出力があれば聞き直さない）。背景の動画もここで作る。"""
+    steps, redo = set(steps), set(redo)
+    moods, song = score(m, o, redo, say), sections(m, o, redo, say)
+    place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
+    sc, rl = build_scenes(m, song, extra=place), credits_of(m, o, song, redo, say)
+    got = []
+    if "emotion" in steps:
+        tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
+        got.append(Target("emotion", o["emotion"], order(
+            m, tl, o, emotion_scenes(m, o, song, moods, redo, say, place), image, rl,
+            black_of(m, song))))
+    if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
+        got.append(Target("base", o["base"], order(m, None, o, *base_look(m, sc, image, rl),
+                                                   black_of(m, song))))
+    return got
 
 
 def compare(m: Manifest, o: Outputs, say: Say) -> None:
@@ -483,20 +513,9 @@ def run(m: Manifest, out_dir: str | Path, *, steps: Iterable[str] = STEPS,
         redo: Iterable[str] = (), jobs: int = 0, say: Say = print) -> Outputs:
     o = Outputs(Path(out_dir))
     o.root.mkdir(parents=True, exist_ok=True)
-    steps, redo = set(steps), set(redo)
-    moods, song = score(m, o, redo, say), sections(m, o, redo, say)
-    place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
-    sc, rl = build_scenes(m, song, extra=place), credits_of(m, o, song, redo, say)
-    if "emotion" in steps:
-        tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
-        produce(m, o["emotion"], tl, o, jobs,
-                emotion_scenes(m, o, song, moods, redo, say, place), image, rl,
-                black_of(m, song))
-        say("emotion: %s" % o["emotion"])
-    if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
-        produce(m, o["base"], None, o, jobs, *base_look(m, sc, image, rl),
-                black_of(m, song))
-        say("base: %s" % o["base"])
-    if "compare" in steps:
+    for t in targets(m, o, steps, redo, say):
+        production.run(t.order, t.out, jobs)
+        say("%s: %s" % (t.role, t.out))
+    if "compare" in set(steps):
         compare(m, o, say)
     return o
