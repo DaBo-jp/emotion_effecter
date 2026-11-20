@@ -416,9 +416,12 @@ def emotion_scenes(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.
 
 
 def black_of(m: Manifest, song: lyrics.Song) -> tuple[float, float] | None:
-    """`fade_in` → (黒から入り始める秒, 秒数)。`after` のセクションの次の頭から入る。"""
+    """`fade_in` → (黒から入り始める秒, 秒数)。`after` のセクションの次の頭から入る
+    （`after` が無ければ曲の頭から）。"""
     if m.fade_in is None:
         return None
+    if "after" not in m.fade_in:
+        return 0.0, float(m.fade_in["seconds"])
     names = [s.name for s in song.sections]
     after = m.fade_in["after"]
     if after not in names:

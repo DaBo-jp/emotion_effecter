@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from emotion_effecter import manifest
+from emotion_effecter import manifest, workflow
 
 
 def _write(root, doc, files=("l.md", "a.wav", "i.png")):
@@ -75,6 +75,14 @@ def test_fade_in_is_read(tmp_path):
     assert manifest.load(tmp_path).fade_in == {"after": "Intro", "seconds": 2}
     _write(tmp_path, DOC)
     assert manifest.load(tmp_path).fade_in is None
+
+
+def test_fade_in_after_can_be_left_out(tmp_path):
+    """after を省けば曲の頭から黒から入る。"""
+    _write(tmp_path, {**DOC, "fade_in": {"seconds": 3}})
+    m = manifest.load(tmp_path)
+    assert m.fade_in == {"seconds": 3}
+    assert workflow.black_of(m, None) == (0.0, 3.0)
 
 
 def test_fade_in_problems_are_all_listed(tmp_path):

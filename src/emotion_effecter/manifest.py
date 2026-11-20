@@ -205,10 +205,10 @@ def _fade_in_problems(doc: Mapping[str, Any]) -> list[str]:
         return []
     cfg = doc["fade_in"]
     if not isinstance(cfg, Mapping):
-        return ['fade_in は {"after": セクション名, "seconds": 秒}']
+        return ['fade_in は {"after": セクション名（省けば曲の頭）, "seconds": 秒}']
     cfg = notes_dropped(cfg)
     bad = ["fade_in の知らない項目: %s" % k for k in sorted(set(cfg) - set(FADE_IN_KEYS))]
-    bad += ["fade_in.%s が無い" % k for k in FADE_IN_KEYS if k not in cfg]
+    bad += [] if "seconds" in cfg else ["fade_in.seconds が無い"]  # after は省ける（曲の頭から）
     bad += [] if isinstance(cfg.get("after", ""), str) else ["fade_in.after はセクション名"]
     sec = cfg.get("seconds", 1.0)
     bad += [] if isinstance(sec, (int, float)) and not isinstance(sec, bool) and sec > 0 else [
