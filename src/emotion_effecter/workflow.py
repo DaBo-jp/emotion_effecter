@@ -2,7 +2,11 @@
 
     score     歌詞 → mood.json（Jev）。**あれば作り直さない**（呼び出しは有料）
     sections  音源 → lyrics.timed.md。あれば作り直さない。歌詞に時刻を手で
-              書いてあれば推定しない（手書きが勝つ）
+              書いてあれば推定しない（手書きが勝つ）。**曲のフォルダに stem
+              （`stems/` か `*Stems*.zip`）があれば**、拍からの推定の代わりに
+              リードボーカルの書き起こし（vocals.json）を歌詞に当てはめ、
+              セクションと行の時刻（lines.json も）を出す。`redo` に `vocals`
+              で書き起こしからやり直す
     emotion   emotion.mp4（三段、感情あり）
     base      base.mp4（三段、感情なし）。**公開版の動画が無い曲だけ**——
               ある曲は公開版そのものを比べる。`sections`（流れの向き）は
@@ -63,11 +67,13 @@ from . import (
     scenery,
     scenes,
     sing,
+    stems,
     structure,
     sync,
     tempo,
     timeline,
     video,
+    vocals,
 )
 from .beats import analyze
 from .manifest import Manifest
@@ -75,7 +81,7 @@ from .manifest import Manifest
 STEPS = ("score", "sections", "emotion", "base", "compare")
 
 #: `redo` に入れられるもの。気持ちの速さ（`pace`）は `tempo` のある曲だけが聞く
-REDO = STEPS + ("pace", "audience", "scenery")
+REDO = STEPS + ("pace", "audience", "scenery", "vocals")
 
 Say = Callable[[str], None]
 
@@ -92,7 +98,7 @@ NAMES: Mapping[str, str] = MappingProxyType({
     "base": "base.mp4", "compare": "compare.mp4", "previews": "previews.png",
     "elements": "elements.json", "suggest": "suggest.md", "pace": "pace.json",
     "audience": "audience.json", "backdrop": "backdrop.mp4", "scenery": "scenery",
-    "lines": "lines.json",
+    "lines": "lines.json", "vocals": "vocals.json",
 })
 
 
@@ -174,7 +180,9 @@ def sections(m: Manifest, o: Outputs, redo: Iterable[str], say: Say) -> lyrics.S
     if song.timed:
         say("sections: 歌詞に時刻が書いてあるのでそれを使う")
         return song
-    if _fresh(o["timed"], "sections", redo):
+    if _fresh(o["timed"], "sections", redo) or "vocals" in redo:
+        if from_stems(m, o, song, redo, say):
+            return lyrics.load(o["timed"])
         bounds = structure.estimate(song, analyze(m.file("audio")))
         text = Path(m.file("lyrics")).read_text(encoding="utf-8")
         Path(o["timed"]).write_text(lyrics.stamp(text, [b.start for b in bounds]),
@@ -182,6 +190,28 @@ def sections(m: Manifest, o: Outputs, redo: Iterable[str], say: Say) -> lyrics.S
         doubt = [b.section for b in bounds if b.doubtful]
         say("sections: %s%s" % (o["timed"], "（要確認: %s）" % ", ".join(doubt) if doubt else ""))
     return lyrics.load(o["timed"])
+
+
+def from_stems(m: Manifest, o: Outputs, song: lyrics.Song, redo: Iterable[str],
+               say: Say) -> bool:
+    """stem があるときのフック。書き起こしを歌詞に当てはめて lyrics.timed.md と
+    lines.json を書く。stem が無い・書き起こせないなら False（拍からの推定に戻る）。"""
+    stem = stems.find(m.root)
+    if stem is None:
+        return False
+    try:
+        words, x = stems.words(stem, o["vocals"], "vocals" in redo)
+    except ImportError:
+        say("sections: stem はあるが faster-whisper が無いので拍から推定する")
+        return False
+    t = vocals.align(song, words, vocals.onset(x, stems.SR))
+    text = Path(m.file("lyrics")).read_text(encoding="utf-8")
+    Path(o["timed"]).write_text(lyrics.stamp(text, list(t.sections)), encoding="utf-8")
+    lines.save(o["lines"], song, [list(r) for r in t.lines])
+    gap = ["%s %d行目" % (song.sections[s].name, i + 1) for s, i in t.filled]
+    say("sections: %s（stem %s から%s）" % (o["timed"], stem.name,
+                                          "。聞き取れず埋めた: " + ", ".join(gap) if gap else ""))
+    return True
 
 
 def _spec(m: Manifest) -> dict:

@@ -29,6 +29,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "grade": 0,           # 画面ぜんたいの色調（灰色・セピア）
     "doc": 0,             # 宣言と保存の JSON の決まりごと（注記・数・版）
     "digest": 0,          # ファイルの中身のハッシュ
+    "stems": 0,           # 曲のフォルダの stem → リードボーカルの書き起こし（Whisper）
     "jev": 0,             # Jev の呼び方と応答の読み方。質問は持たない
 
     # 5 — 歌詞の行の時刻（lines.json）と、reel の区間の動き。互いに知らない
@@ -43,6 +44,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "tempo": 10,          # 昂ぶり + 気持ちの速さ + BPM → 流れ・踊りの速さ。描画を知らない
     "casting": 10,        # 属性 + BPM → effect の候補。描画を知らない
     "structure": 10,      # lyrics + beats → 開始時刻
+    "vocals": 10,         # ボーカルの書き起こし → 歌詞の行とセクションの時刻（緩く当てはめる）
     "scenes": 10,         # lyrics → セクションごとに変える層の引数（流れの向き・速さ）
     "overlay": 10,        # 主役の上や下に重ねる層と、感情で動かす項目
     "sync": 10,           # 聴衆の映像と曲の音源の時刻合わせ

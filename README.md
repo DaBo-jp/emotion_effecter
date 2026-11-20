@@ -70,11 +70,14 @@ uv run --env-file .env emotion-effecter ui        → http://127.0.0.1:8765 を�
 music_data/<曲>/            入力。人が置くもの（元のファイル名のまま）
   song.json                 曲の宣言：タイトル・ジャンル・ファイル・土台・写像
   歌詞_Shape.md, Shape.wav, shape.jpg, Shape_Opening.mp4 ...
+  stems/ か *Stems*.zip    パートごとの音源（あれば。リードボーカルで歌詞の時刻を取る）
 out/<曲>/                   出力。全部作り直せるもの
   mood.json                 採点（Jev）
   pace.json                 気持ちの速さ（Jev）。song.json に tempo がある曲だけ
   elements.json, suggest.md 属性（Jev）と effect の候補。suggest のときだけ
   lyrics.timed.md           開始時刻つきの歌詞
+  lines.json                行ごとの歌い出し（タイムラインで置くか、stem から）
+  vocals.json               リードボーカルの書き起こし（Whisper）。stem がある曲だけ
   emotion.mp4 (+.plan.json) 感情版（Opening / 本編 / Closing）
   base.mp4                  公開版の動画が無い曲だけ：土台の設定で感情なし
   compare.mp4               上：公開版（無ければ base）/ 下：感情版
@@ -283,6 +286,16 @@ out/<曲>/                   出力。全部作り直せるもの
   振り付けなので base.mp4 にも効く。`files.opening` とは一緒に使えない（Ceiling で、
   Opening の動画がうまく作れなかったとき、歌入りの Intro のあいだを黒にした）。
   `after` を省いた `"fade_in": {"seconds": 3}` は**曲の頭から**その秒数で黒から明ける
+- **stem があれば歌詞の時刻をボーカルから取る。** 曲のフォルダに `stems/`（パートごとの
+  音源）か `*Stems*.zip`（Suno の書き出しなど）を置くと、`sections` の工程で拍からの推定の
+  代わりに、リードボーカル（名前に `lead vocal` → `vocal`。`backing` は除く）を Whisper
+  （faster-whisper の medium、CPU で 5 分の曲に 9 分ほど）で書き起こし、歌詞に**緩く**
+  当てはめる——表記ゆれや聞き違いがあっても、行の並び順のまま一致する文字を拾う。
+  セクションの頭は最初の行の歌い出しの 0.25 秒前、間奏は前の行の歌い終わり。聞き落とした
+  行は前後の行の間に文字数の割合で埋め、最初の行は声の大きさが閾値（いちばん大きいところ
+  から 25dB 下）を越えた時刻。行ごとの歌い出しも `lines.json` に書く（歌詞の帯が歌に
+  合う）。書き起こしは `vocals.json` に残し、同じ stem なら使い回す。既にある
+  lyrics.timed.md は `--redo vocals`（書き起こしから）か `--redo sections` で取り直す
 - `reel` で**背景を区間の並びで書く**。mp4（GIF）も画像も何本でも、どの順でも並べられ、
   **effect と歌詞は全部の上に描く**（Opening → 静止画 → Closing はその1つの書き方）。
   区間をつないだ背景の動画（`backdrop.mp4`）を cymatics に渡す
@@ -435,10 +448,10 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 3. **同じ層の横依存は禁止。** 層は順位として宣言し、import は必ず下へ向かう
 
 ```
-  0  architecture / dims / lyrics / beats / video / grade / doc / digest / jev
+  0  architecture / dims / lyrics / beats / video / grade / doc / digest / jev / stems
  5   lines / motion               ← 歌詞の行の時刻 / reel の区間の動き
  10  policy / mood / elements / pace / tempo / casting / structure / scenes / overlay
-     sync / windows / audience / scenery / backdrop / reel / roll / crt
+     sync / windows / audience / scenery / backdrop / reel / roll / crt / vocals
                                   ← 互いに知らない
  15  sing                         ← 歌う行に合わせた歌詞。フォントは roll の探し方
  20  manifest / timeline / placement
@@ -484,6 +497,8 @@ elements    Jev で曲全体の属性（水地風金火明暗）を採点
 casting     属性 + BPM → effect の候補。純粋な計算
 beats       音源 → テンポ・拍・拍ごとの音色
 structure   拍 → セクションの開始時刻（音源を知らない。合成データでテストできる）
+stems       曲のフォルダの stem → リードボーカルの書き起こし（Whisper、vocals.json に使い回し）
+vocals      書き起こし → 歌詞の行とセクションの時刻（緩く当てはめ、聞き落としは埋める）
 sync        聴衆の映像と曲の音源の時刻合わせ
 audience    聴衆の映像 → Jev（セクションごとの盛り上がり）
 scenery     キー画像 → Jev（目印の箱と、effect をどこに添えるか）
