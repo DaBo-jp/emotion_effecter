@@ -333,3 +333,19 @@ def test_gif_opening_is_fitted_to_the_body(tmp_path, media):
     assert video.count_frames(out) == 60 and video.size_of(out) == (128, 72)
     head = _gray(out, 72, 128)[0]
     assert head[:, 40:].max() < 30                               # 透けたところは黒
+
+
+def test_effect_is_left_out_inside_a_mute_window(tmp_path, media):
+    """消す窓の中は背景（一様な灰色 40）だけ。外は effect が描かれる。"""
+    from emotion_effecter import reel
+
+    wav, img, _clips = media
+    out = str(tmp_path / "out.mp4")
+    params = dict(audio=wav, image=img, width=128, height=72, fps=FPS, bands=8,
+                  cache_dir=str(tmp_path))
+    rec = production.produce("stave", params, None, out, chunk_seconds=2,
+                             mute=reel.Mute(((10, 10, 40, 40),)))
+    assert rec["mute"] == [[10, 10, 40, 40]]
+    fr = _gray(out, 72, 128)
+    assert all(abs(fr[f] - 40).max() <= 3 for f in (12, 25, 38))   # 背景だけ
+    assert max(fr[f].max() for f in (45, 50, 55)) > 80               # effect が戻る

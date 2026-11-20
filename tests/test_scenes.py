@@ -324,7 +324,8 @@ def _run_with_fakes(tmp_path, monkeypatch, tempo):
     monkeypatch.setattr(workflow, "paces", lambda *a: "paces")
     monkeypatch.setattr(workflow, "tempo_extra", lambda m, song, moods, ps, say: ps)
     monkeypatch.setattr(workflow, "order",
-                        lambda m, tl, o, sc=None, image=None, rl=None, black=None: (tl, sc))
+                        lambda m, tl, o, sc=None, image=None, rl=None, black=None,
+                               mute=None: (tl, sc))
     monkeypatch.setattr(workflow.production, "run",
                         lambda order, out, jobs=0: got.update({out: order}))
 

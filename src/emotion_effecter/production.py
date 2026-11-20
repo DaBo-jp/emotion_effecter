@@ -37,7 +37,7 @@ from cymatics import effects
 from cymatics.dsp import audio
 
 from . import crt as crt_mod
-from . import digest, drive, video
+from . import digest, drive, reel, video
 from .overlay import Overlay
 from .policy import Policy
 from .scenes import Scenes
@@ -157,6 +157,8 @@ class Order:
     black_out: float | None = None
     #: ブラウン管の走査線と明るい帯（画面ぜんたいに重ねる）
     crt: crt_mod.Crt | None = None
+    #: effect を消す窓（reel の `"effect": false` の区間）
+    mute: reel.Mute | None = None
 
     def check(self) -> None:
         self.pol.check()
@@ -190,7 +192,7 @@ def draw(order: Order, p: Plan, which: Sequence[int], jobs: int = 0) -> list[str
     if not chosen:
         return []
     return drive.render_chunks(order.effect, p.spec, order.tl, chosen, order.pol, jobs,
-                               order.scenes, order.overlays, order.roll)
+                               order.scenes, order.overlays, order.roll, order.mute)
 
 
 def finish(order: Order, p: Plan, parts: Sequence[str], out: str) -> dict[str, Any]:
@@ -220,6 +222,7 @@ def _recorded(order: Order, p: Plan) -> dict[str, Any]:
     rec["black"] = {"in": list(order.black) if order.black is not None else None,
                     "out": order.black_out}
     rec["crt"] = order.crt.to_dict() if order.crt is not None else None
+    rec["mute"] = order.mute.to_list() if order.mute is not None else None
     return rec
 
 
@@ -236,5 +239,5 @@ def produce(effect: str, params: Mapping[str, Any], tl: Timeline | None, out: st
             jobs: int = 0, **options: Any) -> dict[str, Any]:
     """三段の1本を out に書き、隣に再現の記録を置く。戻り値はその記録。
     `options` は `Order` の項目（opening / closing / pol / fade / transition / roll /
-    black / black_out / crt / chunk_seconds / sources / scenes / overlays）。"""
+    black / black_out / crt / mute / chunk_seconds / sources / scenes / overlays）。"""
     return run(Order(effect, params, tl, **options), out, jobs)

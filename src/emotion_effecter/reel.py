@@ -18,6 +18,8 @@ Opening → 静止画 → Closing はその1つの書き方にすぎない。区
   `until` を書かない画像は「残り全部」で、並びに1つだけ置ける。その後ろは尺の決まった
   mp4 だけ（曲の終わりから逆に置ける。Closing の形）。ループする mp4・流れ（`flow`）も
   画像と同じく `until` まで、書かなければ残り全部
+- **`"effect": false` でその区間だけ effect を描かない**（`Mute`）。背景と歌詞・仕上げは
+  そのまま。入り（`in`）のある境目では、その秒数で effect が薄れて消え、戻る
 - **`motion` で区間の絵を動く矩形にする**（`motion.py`）。画像・mp4 は画面ぜんたいを
   覆ってから縮んで移る。`{"flow": [素材, ...]}` の区間は、素材が縮んだ矩形になって
   歌詞の帯のように流れる
@@ -44,9 +46,9 @@ from .lyrics import Song
 
 #: 区間の種類 → 書けるもの
 KEYS: Mapping[str, tuple[str, ...]] = MappingProxyType({
-    "image": ("image", "until", "in", "motion"),
-    "video": ("video", "loop", "until", "in", "motion"),
-    "flow": ("flow", "until", "in", "motion"),
+    "image": ("image", "until", "in", "motion", "effect"),
+    "video": ("video", "loop", "until", "in", "motion", "effect"),
+    "flow": ("flow", "until", "in", "motion", "effect"),
 })
 #: `in` に書けるもの
 IN_KEYS = ("transition", "seconds")
@@ -65,6 +67,7 @@ class Segment:
     items: tuple[str, ...] = ()     # flow の素材（絶対パス）
     #: `motion` の中身（既定値で埋めた項目の組）。無ければ動かない
     motion: tuple[tuple[str, Any], ...] | None = None
+    effect: bool = True             # false ならこの区間は effect を描かない
 
     @property
     def fills(self) -> bool:
@@ -124,8 +127,8 @@ def _segment_problems(i: int, doc: Any, root: Path) -> list[str]:
     kind = _kind(doc)
     bad = ["%s の知らない項目: %s" % (at, k) for k in sorted(set(doc) - set(KEYS[kind]))]
     bad += _files_problems(at, kind, doc, root)
-    if "loop" in doc and not isinstance(doc["loop"], bool):
-        bad.append("%s.loop は true / false" % at)
+    bad += ["%s.%s は true / false" % (at, k) for k in ("loop", "effect")
+            if k in doc and not isinstance(doc[k], bool)]
     if kind == "video" and "until" in doc and doc.get("loop") is not True:
         bad.append("%s.until は繰り返す動画（\"loop\": true）だけ。mp4 はその尺" % at)
     if "motion" in doc:
@@ -166,7 +169,7 @@ def from_list(doc: Sequence[Mapping[str, Any]], root: Path) -> tuple[Segment, ..
         out.append(Segment(kind, "" if kind == "flow" else str((root / d[kind]).resolve()),
                            d.get("until"), cfg.get("transition", "fade"),
                            float(cfg.get("seconds", 0.0)), bool(d.get("loop", False)), items,
-                           moves))
+                           moves, bool(d.get("effect", True))))
     return tuple(out)
 
 
@@ -246,13 +249,56 @@ def _checked(segs: Sequence[Segment], ends: Sequence[int | str], song_f: int,
     return spans
 
 
+# ------------------------------------------------------------- effect を消す
+#: 窓の端を開いたままにする大きなフレーム番号（最後の区間の後ろ）
+OPEN_END = 1 << 40
+
+
+@dataclass(frozen=True)
+class Mute:
+    """effect を消す窓の並び。窓 (a, b, c, d) は a→b で薄れ、b..c は消え、c→d で戻る。
+    フレーム番号だけで決まる（pickle できる）∴ 分割書き出しでも同じ絵。"""
+
+    windows: tuple[tuple[int, int, int, int], ...] = ()
+
+    def gain(self, f: int) -> float:
+        """フレーム f の effect の濃さ 0..1（窓が重なれば薄い方）。"""
+        return min((_window_gain(w, f) for w in self.windows), default=1.0)
+
+    def to_list(self) -> list[list[int]]:
+        return [list(w) for w in self.windows]
+
+
+def _window_gain(w: tuple[int, int, int, int], f: int) -> float:
+    a, b, c, d = w
+    if f < a or f >= d:
+        return 1.0
+    if f < b:
+        return 1.0 - (f - a + 1) / (b - a + 1)
+    if f < c:
+        return 0.0
+    return (f - c + 1) / (d - c + 1)
+
+
+def mute_of(spans: Sequence[Span]) -> Mute:
+    """`"effect": false` の区間 → 消す窓。区間の入りで薄れ、次の区間の入りで戻る。"""
+    out = []
+    for i, s in enumerate(spans):
+        if s.seg.effect:
+            continue
+        nxt = spans[i + 1] if i + 1 < len(spans) else None
+        c, d = (s.f1 - nxt.overlap, s.f1) if nxt is not None else (OPEN_END, OPEN_END)
+        out.append((s.f0, s.f0 + s.overlap, c, d))
+    return Mute(tuple(out))
+
+
 # ------------------------------------------------------------- 書く
 def record(spans: Sequence[Span], frames: int, fps: int,
            size: tuple[int, int]) -> dict[str, Any]:
     """作り直すかを決める記録。ファイルは中身のハッシュで持つ。"""
     sums = {p: digest.sha256(p) for s in spans for p in s.seg.files}
     return {"spans": [[s.seg.kind, [[p, sums[p]] for p in s.seg.files], s.f0, s.frames,
-                       s.overlap, s.seg.transition, s.seg.loop,
+                       s.overlap, s.seg.transition, s.seg.loop, s.seg.effect,
                        dict(s.seg.motion) if s.seg.motion is not None else None]
                       for s in spans],
             "frames": frames, "fps": fps, "size": list(size), "crf": video.CRF,

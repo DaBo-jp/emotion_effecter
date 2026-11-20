@@ -18,6 +18,9 @@ cymatics の pipeline は effect を外から受け取る（`pipeline.render(eff
   `finish`）。動かさない Policy なら `finish` を渡さない ∴ 画素は変わらない
 - 歌詞（流れる `roll.Roll`、歌う行に合わせた `sing.Sing`）も `finish` で、色調の**後に**
   描く（文字は染めない）
+- effect を消す窓（`reel.Mute`）があれば、全部の層の `draw()` を包んで、描く前の絵と
+  描いた絵をその濃さで混ぜる。**消すあいだも描きはする**（流れの粒など、前のフレームを
+  引き継ぐ effect の絵が、戻ったときに変わらない）。無ければ包まない ∴ 画素は変わらない
 """
 from __future__ import annotations
 
@@ -40,6 +43,7 @@ from . import roll as roll_mod
 from . import sing as sing_mod
 from .overlay import Overlay
 from .policy import Look, Policy, look, tone, toned
+from .reel import Mute
 from .scenes import Scenes
 from .timeline import Timeline
 
@@ -181,6 +185,23 @@ def wrap_overlay(eff: effects.Effect, ov: Overlay, tl: Timeline | None) -> effec
     return _redrawn(eff, draw)
 
 
+def muted(eff: effects.Effect, mute: Mute | None) -> effects.Effect:
+    """`mute` の窓で effect を消す `draw()`。窓が無ければ元のまま。"""
+    if mute is None or not mute.windows:
+        return eff
+    inner = eff.module
+
+    def draw(img, ctx, fr):
+        k = mute.gain(fr.f)
+        if k >= 1.0:
+            return inner.draw(img, ctx, fr)
+        before = img.copy()
+        drawn = inner.draw(img, ctx, fr) or img
+        return before if k <= 0.0 else Image.blend(before, drawn, k)
+
+    return _redrawn(eff, draw)
+
+
 #: 画面に描く歌詞の配置
 type Lyrics = roll_mod.Roll | sing_mod.Sing
 
@@ -242,7 +263,7 @@ def _stacked(main: effects.Effect, s: Mapping[str, Any], ovs: Sequence[Overlay],
 
 def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
            pol: Policy = Policy(), sc: Scenes | None = None,
-           ovs: Sequence[Overlay] = (), rl: Lyrics | None = None):
+           ovs: Sequence[Overlay] = (), rl: Lyrics | None = None, mute: Mute | None = None):
     """平らな Spec 1つで書き出す。`tl=None` かつ `sc=None` で重ねる層が無ければ
     素の cymatics と同じ。
 
@@ -256,8 +277,9 @@ def render(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     main = wrap(eff, tl, pol, sc) if tl or sc else eff
     finish = finisher(tl, pol, rl, int(s["fps"]))
     if not ovs:
-        return pipeline.render(main, s, finish)
+        return pipeline.render(muted(main, mute), s, finish)
     comp, get = _stacked(main, s, ovs, tl)
+    get = {k: muted(e, mute) for k, e in get.items()}
     return pipeline.render_composition(comp, get.__getitem__, finish)
 
 
@@ -281,19 +303,19 @@ def plan_chunks(f0: int, f1: int, size: int, workdir: str) -> list[Chunk]:
 
 
 def _render_chunk(job) -> str:
-    effect, params, tl, pol, sc, ovs, rl, chunk = job
+    effect, params, tl, pol, sc, ovs, rl, mute, chunk = job
     fps = int(params["fps"])
     p = {**params, **chunk.window(fps), "out": chunk.path, "no_audio": True}
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
-        render(effect, p, tl, pol, sc, ovs, rl)
+        render(effect, p, tl, pol, sc, ovs, rl, mute)
     return chunk.path
 
 
 def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
                   chunks: list[Chunk], pol: Policy = Policy(), jobs: int = 0,
                   sc: Scenes | None = None, ovs: Sequence[Overlay] = (),
-                  rl: Lyrics | None = None) -> list[str]:
+                  rl: Lyrics | None = None, mute: Mute | None = None) -> list[str]:
     """区間ごとに並列で書き出す（音なし）。戻り値は区間の動画、順番どおり。
 
     precomputed の包絡は初回にキャッシュへ書かれるので、先に1枚描いて温めておく
@@ -303,8 +325,9 @@ def render_chunks(effect: str, params: Mapping[str, Any], tl: Timeline | None,
     with open(os.devnull, "w") as quiet, contextlib.redirect_stdout(quiet), \
             contextlib.redirect_stderr(quiet):
         render(effect, {**params, "preview": chunks[0].path + ".warm.png",
-                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc, ovs, rl)
+                        "preview_at": chunks[0].f0 / int(params["fps"])}, tl, pol, sc, ovs, rl,
+               mute)
     os.remove(chunks[0].path + ".warm.png")
-    work = [(effect, params, tl, pol, sc, ovs, rl, c) for c in chunks]
+    work = [(effect, params, tl, pol, sc, ovs, rl, mute, c) for c in chunks]
     with ProcessPoolExecutor(max_workers=jobs or min(len(chunks), os.cpu_count() or 1)) as ex:
         return list(ex.map(_render_chunk, work))

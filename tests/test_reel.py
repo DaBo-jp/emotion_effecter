@@ -229,3 +229,27 @@ def test_motion_options_follow_the_lyrics_band():
 
     assert dict(motion.POSITIONS) == dict(roll.POSITIONS)
     assert motion.DIRECTIONS == roll.DIRECTIONS
+
+
+def test_effect_off_fades_out_on_the_way_in_and_back_on_the_next_way_in():
+    """`"effect": false` の区間：入り（10 フレーム）で薄れ、次の入り（4 フレーム）で戻る。"""
+    segs = [_seg("image", "a", until=3.0), reel.Segment("video", "v", seconds=1.0, effect=False),
+            reel.Segment("image", "b", seconds=0.4)]
+    spans = reel.place(segs, SONG, SONG_F, FPS, _len({"v": 30}))
+    mute = reel.mute_of(spans)
+    assert mute.windows == ((20, 30, 46, 50),)
+    g = [mute.gain(f) for f in range(0, 60)]
+    assert g[19] == 1.0 and 0 < g[25] < 1 and g[30] == 0.0 and g[45] == 0.0
+    assert 0 < g[47] < 1 and g[50] == 1.0
+    assert all(a >= b for a, b in zip(g[20:31], g[21:31]))      # 薄れていく
+    last = reel.mute_of(reel.place([_seg("image", "a", until=3.0),
+                                    reel.Segment("image", "b", effect=False)],
+                                   SONG, SONG_F, FPS))
+    assert last.gain(99) == 0.0 and last.gain(10 ** 6) == 0.0  # 最後なら戻らない
+    assert reel.mute_of(spans[:1]).windows == ()
+
+
+def test_effect_must_be_a_bool(tmp_path):
+    _files(tmp_path, "a.jpg")
+    msg = "\n".join(reel.problems([{"image": "a.jpg", "effect": "no"}], tmp_path))
+    assert "reel[0].effect は true / false" in msg

@@ -270,11 +270,25 @@ def _logged(o: Outputs, rec: dict, say: Say) -> str:
     return o["backdrop"]
 
 
+def reel_spans(m: Manifest, song: lyrics.Song) -> list[reel.Span]:
+    """`reel` の区間を時間に置いたもの。"""
+    fps = fps_of(m)
+    return reel.place(m.reel, song, int(audio.duration(m.file("audio")) * fps), fps)
+
+
+def mute_of(m: Manifest, song: lyrics.Song) -> reel.Mute | None:
+    """effect を消す窓（`reel` の `"effect": false` の区間）。無ければ None。"""
+    if not m.reel:
+        return None
+    mute = reel.mute_of(reel_spans(m, song))
+    return mute if mute.windows else None
+
+
 def reel_backdrop(m: Manifest, o: Outputs, song: lyrics.Song, say: Say) -> str:
     """`reel` の区間をつないだ背景の動画（入力が同じなら作らない）。"""
     fps, size = fps_of(m), size_of(m)
     dur = audio.duration(m.file("audio"))
-    spans = reel.place(m.reel, song, int(dur * fps), fps)
+    spans = reel_spans(m, song)
     frames = math.ceil(dur * fps) + BACKDROP_TAIL * fps
     rec = reel.record(spans, frames, fps, size)
     if _rewrite(o, rec):
@@ -419,7 +433,8 @@ def black_of(m: Manifest, song: lyrics.Song) -> tuple[float, float] | None:
 def order(m: Manifest, tl: timeline.Timeline | None, o: Outputs,
           sc: scenes.Scenes | None = None, image: str | None = None,
           rl: drive.Lyrics | None = None,
-          black: tuple[float, float] | None = None) -> production.Order:
+          black: tuple[float, float] | None = None,
+          mute: reel.Mute | None = None) -> production.Order:
     """1本の書き出しの注文。`black` は黒からの入り（`black_of`）。黒への落ちは
     `m.fade_out` から。"""
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image")}
@@ -432,7 +447,7 @@ def order(m: Manifest, tl: timeline.Timeline | None, o: Outputs,
                             closing=m.file("closing"), pol=policy.from_mapping(m.policy),
                             sources=sources, scenes=sc, overlays=m.overlays,
                             fade=m.clip_xfade, transition=m.clip_transition, roll=rl,
-                            black=black, black_out=m.fade_out, crt=m.crt)
+                            black=black, black_out=m.fade_out, crt=m.crt, mute=mute)
 
 
 @dataclass(frozen=True)
@@ -452,15 +467,15 @@ def targets(m: Manifest, o: Outputs, steps: Iterable[str], redo: Iterable[str],
     moods, song = score(m, o, redo, say), sections(m, o, redo, say)
     place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
     sc, rl = build_scenes(m, song, extra=place), credits_of(m, o, song, redo, say)
-    got = []
+    mute, got = mute_of(m, song), []
     if "emotion" in steps:
         tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
         got.append(Target("emotion", o["emotion"], order(
             m, tl, o, emotion_scenes(m, o, song, moods, redo, say, place), image, rl,
-            black_of(m, song))))
+            black_of(m, song), mute)))
     if "base" in steps and not m.file("published") and _fresh(o["base"], "base", redo):
         got.append(Target("base", o["base"], order(m, None, o, *base_look(m, sc, image, rl),
-                                                   black_of(m, song))))
+                                                   black_of(m, song), mute)))
     return got
 
 
@@ -473,10 +488,11 @@ def compare(m: Manifest, o: Outputs, say: Say) -> None:
 
 def _shot(m: Manifest, tl: timeline.Timeline | None, t: float, png: str,
           sc: scenes.Scenes | None = None, image: str | None = None,
-          rl: drive.Lyrics | None = None) -> str:
+          rl: drive.Lyrics | None = None, mute: reel.Mute | None = None) -> str:
     params = {**m.params, "audio": m.file("audio"), "image": image or m.file("image"),
               "out": png + ".mp4", "preview": png, "preview_at": t}
-    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc, m.overlays, rl)
+    drive.render(m.effect, params, tl, policy.from_mapping(m.policy), sc, m.overlays, rl,
+                 mute)
     return png
 
 
@@ -489,7 +505,7 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
     tl = build_timeline(m, song, moods, cheered=cheers(m, o, song, redo, say))
     place, image = placed(m, o, song, redo, say), backdrop_of(m, o, song, say)
     sc, rl = build_scenes(m, song, extra=place), credits_of(m, o, song, redo, say)
-    sc_mood = emotion_scenes(m, o, song, moods, redo, say, place)
+    sc_mood, mute = emotion_scenes(m, o, song, moods, redo, say, place), mute_of(m, song)
     ends = [s.start for s in song.sections[1:]] + [audio.duration(m.file("audio"))]
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -500,7 +516,7 @@ def previews(m: Manifest, o: Outputs, song: lyrics.Song, moods: list[mood.Mood],
             v = tl.frame(int(t * tl.fps))
             label = "%s  %s  %s" % (sec.name.split(" - ")[0], lyrics.fmt_time(t), "  ".join(
                 "%s %.2f" % (d[:3], v[d]) for d in dims.AXES if d in v))
-            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y, im, r)
+            pair = [_shot(m, x, t, "%s/%d_%s.png" % (tmp, i, k), y, im, r, mute)
                     for k, x, y, im, r in (("base", None, *base_look(m, sc, image, rl)),
                                            ("mood", tl, sc_mood, image, rl))]
             rows.append((label, pair))
