@@ -190,6 +190,23 @@ def test_flow_items_pass_through_the_column_and_jitter_stays_inside():
     assert max(s.index for s in alt.slots(8.0)) >= 2             # speed を書けば繰り返す
 
 
+def test_flow_ends_center_starts_and_stops_with_an_item_in_the_middle():
+    """ends=center: 最初の素材が真ん中から始まり、最後の素材が真ん中で終わる。"""
+    from emotion_effecter import motion
+
+    cfg = dict(motion.options({"position": "center", "width": 0.5, "item": 0.5, "gap": 0.0,
+                               "ends": "center"}, "flow"))
+    st = motion.Stream([(10, 10), (10, 20), (10, 10)], cfg, (100, 100), 10.0)
+
+    def mid(t, item):
+        r = next(s.rect for s in st.slots(t) if s.item == item)
+        return r.y + r.h / 2
+    assert abs(mid(0.0, 0) - 50) < 1e-6                          # 始まりは最初が真ん中
+    assert abs(mid(10.0, 2) - 50) < 0.5                          # 終わりは最後が真ん中
+    assert mid(5.0, 1) < mid(0.0, 0) + 50                        # 途中は上へ流れている
+    assert motion.problems({"ends": "middle"}, "flow", "reel[0]")
+
+
 def test_flow_writes_items_over_a_blurred_back(tmp_path):
     """画像と GIF が流れる。後ろは見えている素材をぼかしたもので、素材が無ければ単色。"""
     red = str(tmp_path / "r.png")

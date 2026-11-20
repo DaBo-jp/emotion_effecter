@@ -45,6 +45,9 @@ POSITIONS: Mapping[str, str] = MappingProxyType({
     "left_right": "left", "right_left": "right"})
 #: 流れる向き。歌詞の帯（`roll.DIRECTIONS`）と同じ
 DIRECTIONS: tuple[str, ...] = ("up", "down")
+#: 流れの始まりと終わり。edge＝空の列に入ってきて出きる、center＝最初の素材が列の
+#: 真ん中にいるところから始まり、最後の素材が真ん中に来たところで終わる
+ENDS: tuple[str, ...] = ("edge", "center")
 
 #: 縮む・流れるの両方に書ける項目と既定値
 COMMON: Mapping[str, Any] = MappingProxyType({
@@ -74,6 +77,7 @@ FLOW: Mapping[str, Any] = MappingProxyType({
     "seed": 0,
     "edge_fade": 0.0,        # 上下の端で薄れる幅 ÷ 画面の高さ
     "loop": False,           # 動画の素材を繰り返すか（しなければ最後のコマで止まる）
+    "ends": "edge",          # 始まりと終わり（ENDS）
 })
 #: 数の項目の範囲（両端を含む）
 RANGES: Mapping[str, tuple[float, float]] = MappingProxyType({
@@ -101,7 +105,8 @@ def defaults(mode: str) -> Mapping[str, Any]:
 def _choice_problems(cfg: Mapping[str, Any], mode: str, at: str) -> list[str]:
     """名前で選ぶ項目と、true / false・整数の項目。"""
     choices = {"position": POSITIONS if mode == "flow" else ("right", "left", "center"),
-               "back": BACKS, **({"direction": DIRECTIONS} if mode == "flow" else {})}
+               "back": BACKS,
+               **({"direction": DIRECTIONS, "ends": ENDS} if mode == "flow" else {})}
     bad = ["%s.motion.%s=%r は %s のどれか" % (at, k, cfg[k], " / ".join(v))
            for k, v in choices.items() if cfg[k] not in v]
     if mode == "flow" and not isinstance(cfg["loop"], bool):
@@ -220,11 +225,19 @@ class Stream:
         self._gap = cfg["gap"] * h
         self._starts = list(np.cumsum([0.0] + [d[1] + self._gap for d in self._dims]))
         self._period = self._starts[-1]           # 並び1周の長さ（最後の後ろの間を含む）
-        length = self._period - self._gap         # 最初の頭から最後のお尻まで
+        self._off0, off1 = self._span(h)
         self._speed = cfg["speed"] * h if cfg["speed"] > 0 else \
-            (h + length) / max(seconds, EPS)
+            (off1 - self._off0) / max(seconds, EPS)
         self._repeat = cfg["speed"] > 0
         self._sides = self._sides_of(cfg["position"])
+
+    def _span(self, h: float) -> tuple[float, float]:
+        """始まりと終わりの、並びの頭が入った量。center は最初・最後の素材が列の真ん中。"""
+        length = self._period - self._gap         # 最初の頭から最後のお尻まで
+        if self._cfg["ends"] != "center":
+            return 0.0, h + length
+        first, last = self._dims[0][1], self._dims[-1][1]
+        return (h + first) / 2, self._starts[-2] + (h + last) / 2
 
     @staticmethod
     def _sides_of(position: str) -> tuple[str, ...]:
@@ -245,7 +258,7 @@ class Stream:
     def slots(self, t: float) -> list[Slot]:
         """時刻 t に画面にかかる素材。"""
         h, n = self._size[1], len(self._dims)
-        off = self._speed * max(t, 0.0)           # 並びの頭が画面の端からどれだけ入ったか
+        off = self._off0 + self._speed * max(t, 0.0)  # 並びの頭が画面の端からどれだけ入ったか
         rounds = range(int(off // self._period) + 1) if self._repeat else range(1)
         out = []
         for r in rounds:
