@@ -287,3 +287,49 @@ def test_channel_falls_back_to_the_expression_when_clips_are_short(tmp_path):
     """前の素材が重なりより短い（つなぎ目どうしが重なる）ときは数式で描く。"""
     assert not video._separable([10, 4, 10], [0, 3, 3], 2)
     assert video._separable([10, 6, 10], [0, 3, 3], 2)
+
+
+def _gif(path, size=(61, 35), delays=(100, 100, 300, 500)):
+    """透けた地に赤い四角が右へ動く GIF。辺は奇数（x264 はそのままでは書けない）、
+    コマごとに表示時間が違う。"""
+    w, h = size
+    frames = []
+    for i in range(len(delays)):
+        im = Image.new("RGBA", size, (0, 0, 0, 0))
+        im.paste((255, 255, 255, 255), (i * 10, 0, i * 10 + 10, h))
+        frames.append(im)
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=list(delays),
+                   loop=0, disposal=2)
+    return path
+
+
+def test_gif_length_is_the_sum_of_its_frame_delays(tmp_path):
+    gif = _gif(str(tmp_path / "a.gif"))
+    assert video.is_animated(gif) and not video.is_animated("a.mp4")
+    assert video.frames_of(gif, FPS) == 10                       # 0.1+0.1+0.3+0.5 秒
+
+
+def test_gif_goes_through_a_chain_like_a_video(tmp_path):
+    """`reel` の区間：GIF も動画として読み、画面を覆って、透けたところは黒。"""
+    gif = _gif(str(tmp_path / "a.gif"))
+    src = video.source(gif, False, FPS, 12, (122, 70))
+    dst = video.chain([src], [12], [0], ["fade"], FPS, str(tmp_path / "x.mp4"), (122, 70))
+    fr = _gray(dst, 70, 122)
+    assert len(fr) == 12                                         # 足りないぶんは最後のコマで
+    assert fr[0][:, :16].min() > 200 and fr[0][:, 30:].max() < 30   # 白い帯の外は黒
+    assert fr[-1][:, 62:78].min() > 200 and fr[-1][:, :50].max() < 30
+
+
+def test_gif_opening_is_fitted_to_the_body(tmp_path, media):
+    """三段の Opening が GIF（大きさも辺の偶奇も本編と違う）でも、本編に揃えてつなぐ。"""
+    wav, img, (_opening, closing) = media
+    gif = _gif(str(tmp_path / "open.gif"))
+    out = str(tmp_path / "out.mp4")
+    params = dict(audio=wav, image=img, width=128, height=72, fps=FPS, bands=8,
+                  cache_dir=str(tmp_path))
+    rec = production.produce("stave", params, None, out, opening=gif, closing=closing,
+                             chunk_seconds=2)
+    assert rec["cut"]["body0"] == 10
+    assert video.count_frames(out) == 60 and video.size_of(out) == (128, 72)
+    head = _gray(out, 72, 128)[0]
+    assert head[:, 40:].max() < 30                               # 透けたところは黒

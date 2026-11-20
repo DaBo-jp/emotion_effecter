@@ -35,7 +35,7 @@ from .workflow import NAMES, REDO, STEPS
 KINDS: Mapping[str, tuple[str, ...]] = MappingProxyType({
     "audio": (".wav", ".mp3", ".flac", ".m4a", ".aac", ".ogg"),
     "image": (".jpg", ".jpeg", ".png", ".webp"),
-    "video": (".mp4", ".mov", ".mkv", ".webm"),
+    "video": (".mp4", ".mov", ".mkv", ".webm", ".gif"),
     "lyrics": (".md", ".txt"),
 })
 

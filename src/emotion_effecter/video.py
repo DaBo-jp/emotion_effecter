@@ -77,7 +77,7 @@ def still_at(path: str, t: float, dst: str) -> str:
     短い辺が下限に届かない映像は断る——引き伸ばしても見えるものは増えない。
     """
     lo, hi = IMAGE_SIDE
-    _ff("-ss", "%.3f" % t, "-i", path, "-frames:v", "1", "-vf",
+    _ff("-ss", "%.3f" % t, "-i", path, "-frames:v", "1", "-vf", _opaque(path) +
         "scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease" % (hi, hi),
         "-q:v", "3", dst)
     with Image.open(dst) as im:
@@ -87,10 +87,38 @@ def still_at(path: str, t: float, dst: str) -> str:
     return dst
 
 
-def conform(src: str, dst: str, fps: int, frames: int) -> str:
-    """fps を揃えて、ちょうど frames フレームに切る。音は捨てる（後で乗せ直す）。"""
-    _ff("-i", src, "-vf", "fps=%d" % fps, "-frames:v", str(frames), "-an",
-        *ENCODE, dst)
+#: 動画として読む動く画像（アニメーション GIF）。尺は各コマの表示時間の和で、ループは
+#: 1周だけ（ffmpeg の既定）。透けたところは黒に落とす（`_opaque`）
+ANIMATED: tuple[str, ...] = (".gif",)
+
+
+def is_animated(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in ANIMATED
+
+
+def _opaque(src: str) -> str:
+    """透けうる素材なら、透けたところを黒にするフィルタ（色に不透明度を掛ける。yuv へ
+    移すと不透明度は捨てられる）＋ `,`。それ以外は空。"""
+    return "format=rgba,premultiply=inplace=1," if is_animated(src) else ""
+
+
+def _fit(size: tuple[int, int]) -> str:
+    """画面 `size` を覆うように拡大して中央で切る。"""
+    w, h = size
+    return "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1" % (w, h, w, h)
+
+
+def conform(src: str, dst: str, fps: int, frames: int,
+            size: tuple[int, int] | None = None) -> str:
+    """fps を揃えて、ちょうど frames フレームに切る。音は捨てる（後で乗せ直す）。
+
+    `size` を渡して大きさが違えば、その画面を覆うように拡大して中央で切る（つなぐ相手と
+    揃える）。アニメーション GIF は透けたところを黒にする。
+    """
+    vf = "fps=%d,%s" % (fps, _opaque(src))
+    if size is not None and size_of(src) != tuple(size):
+        vf += _fit(size)
+    _ff("-i", src, "-vf", vf.rstrip(","), "-frames:v", str(frames), "-an", *ENCODE, dst)
     return dst
 
 
@@ -289,15 +317,15 @@ def _join(srcs: Sequence[Source], frames: Sequence[int], overlaps: Sequence[int]
 
 def source(src: str, still: bool, fps: int, frames: int, size: tuple[int, int]) -> Source:
     """`chain` に渡す1本：(入力の引数, フィルタ)。画面 `size` を覆うように拡大して中央で
-    切り、ちょうど `frames` フレームに。動画が足りなければ最後のフレームで止める。"""
-    w, h = size
-    fit = "scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d,setsar=1" % (w, h, w, h)
+    切り、ちょうど `frames` フレームに。動画が足りなければ最後のフレームで止める。
+    アニメーション GIF も動画として読む（透けたところは黒）。"""
+    fit = _fit(size)
     if still:
         # 1回だけ縮めて、そのフレームを繰り返す（毎フレーム読み直すと14倍遅い）
         return ["-i", src], "%s,loop=loop=%d:size=1:start=0,setpts=N/%d/TB,fps=%d" % (
             fit, frames - 1, fps, fps)
-    return ["-i", src], "fps=%d,%s,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d" % (
-        fps, fit, frames)
+    return ["-i", src], "fps=%d,%s%s,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d" % (
+        fps, _opaque(src), fit, frames)
 
 
 def chain(sources: Sequence[Source], frames: Sequence[int], overlaps: Sequence[int],

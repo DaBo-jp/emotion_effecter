@@ -103,12 +103,13 @@ def _assemble(parts: list[str], c: Cut, opening: str | None, closing: str | None
     """
     if c.fade:
         return _blended(parts, c, opening, closing, tmp, transition, fin)
+    size = video.size_of(parts[0])
     if opening:
-        parts = [video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps, c.body0),
-                 *parts]
+        parts = [video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps, c.body0,
+                               size), *parts]
     if closing:
         parts = [*parts, video.conform(closing, os.path.join(tmp, "closing.mp4"),
-                                       c.fps, c.total - c.body1)]
+                                       c.fps, c.total - c.body1, size)]
     silent = video.concat(parts, os.path.join(tmp, "video.mp4"))
     if fin.empty():
         return silent
@@ -121,12 +122,13 @@ def _blended(parts: list[str], c: Cut, opening: str | None, closing: str | None,
     """つなぎ目を `c.fade` フレーム重ねて混ぜる。本編の区間は重なりのぶん長く描いてある。"""
     f0, f1 = c.drawn()
     clips = [(video.concat(parts, os.path.join(tmp, "body.mp4")), f1 - f0)]
+    size = video.size_of(clips[0][0])
     if opening:
         clips.insert(0, (video.conform(opening, os.path.join(tmp, "opening.mp4"), c.fps,
-                                       c.body0), c.body0))
+                                       c.body0, size), c.body0))
     if closing:
         clips.append((video.conform(closing, os.path.join(tmp, "closing.mp4"), c.fps,
-                                    c.total - c.body1), c.total - c.body1))
+                                    c.total - c.body1, size), c.total - c.body1))
     return video.crossfade([p for p, _ in clips], [n for _, n in clips], c.fade, c.fps,
                            os.path.join(tmp, "video.mp4"), transition, fin)
 

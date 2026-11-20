@@ -574,7 +574,8 @@ async function showMaterial(m) {
   if (P.media) P.media.pause();
   const layer = $("#material"), url = matUrl(m);
   let body;
-  if (m.kind === "image") body = h("img", { src: url });
+  // アニメーション GIF は動画の素材だが、<video> では動かない
+  if (m.kind === "image" || /\.gif$/i.test(m.path)) body = h("img", { src: url });
   else if (m.kind === "video") body = h("video", { src: url, controls: true, autoplay: true });
   else if (m.kind === "audio") body = h("div", { class: "empty" }, h("audio", { src: url, controls: true, autoplay: true }));
   else {
