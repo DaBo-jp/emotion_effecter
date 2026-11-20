@@ -282,7 +282,7 @@ out/<曲>/                   出力。全部作り直せるもの
   黒から明ける。画面ぜんたい（絵・effect・歌詞）にかかり、曲の尺は変わらない。
   振り付けなので base.mp4 にも効く。`files.opening` とは一緒に使えない（Ceiling で、
   Opening の動画がうまく作れなかったとき、歌入りの Intro のあいだを黒にした）
-- `reel` で**背景を区間の並びで書く**。mp4 も画像も何本でも、どの順でも並べられ、
+- `reel` で**背景を区間の並びで書く**。mp4（GIF）も画像も何本でも、どの順でも並べられ、
   **effect と歌詞は全部の上に描く**（Opening → 静止画 → Closing はその1つの書き方）。
   区間をつないだ背景の動画（`backdrop.mp4`）を cymatics に渡す
 
@@ -298,8 +298,32 @@ out/<曲>/                   出力。全部作り直せるもの
   |---|---|
   | `video` | mp4 はその尺。曲の終わりを越える最後の mp4 だけ曲の終わりで切る |
   | `image` + `until` | 画像はセクション名（その区間が始まった後に最初に終わる、その名前のセクションの終わり。`Instrumental Break` のように何度あってもいい）か秒まで |
-  | `image`（`until` なし） | 残り全部。並びに1つだけで、後ろは mp4 だけ（尺で曲の終わりから逆に置く） |
+  | `image`（`until` なし） | 残り全部。並びに1つだけで、後ろは繰り返さない mp4 だけ（尺で曲の終わりから逆に置く）。ループする mp4・`flow` も同じ |
   | `in` | その区間の入り方。`transition`（`clip_transition` と同じ 58 種類、既定 `fade`）で `seconds` 秒。移り終えた時刻が区切りになり、入ってくる区間は `seconds` 秒早く始まる。書かなければ切り替え。最初の区間には書けない（黒から入るなら `fade_in`） |
+  | `video` + `"loop": true` | mp4（GIF）を繰り返して、画像と同じく `until` まで（無ければ残り全部） |
+  | `flow` + `until` | 素材（画像・mp4・GIF）の並びを、縮んだ矩形にして歌詞の帯のように流す（下の `motion`） |
+  | `motion` | 区間の絵を動く矩形にする（`motion.py`）。画像・mp4 は**画面ぜんたいを覆ってから、比率を保って縮みながら列へ移る**。`flow` は素材が列の中を次々に流れる |
+
+  ```json
+  {"image": "a.jpg", "until": "Chorus 1",
+   "motion": {"position": "right", "width": 0.4, "anchor": 0.5, "hold": 1, "seconds": 1.5}}
+  {"flow": ["a.jpg", "b.gif", "c.mp4"], "until": "Bridge",
+   "motion": {"position": "left_right", "direction": "up", "item": 0.8, "jitter": 1}}
+  ```
+
+  `motion` の項目は歌詞の帯（`credits`）に準じる。時刻は前の区間からの入り（`in`）が
+  終わったところから数える。透けた素材（PNG・GIF）は透けたまま重ねる。
+
+  | 項目 | 値 |
+  |---|---|
+  | `position` / `width` / `margin` | 列の位置（`right` / `left` / `center`。流れは `left_right` / `right_left` で素材ごとに左右を入れ替え）・列の幅・端からの余白（画面の幅に対する比） |
+  | `band` / `band_alpha` | 列の裏の帯（上から下まで）の色と不透明度（既定 0＝無し） |
+  | `back` | 空いたところ。`blur`（既定）＝自分を画面いっぱいにぼかして `dim` だけ暗く（流れは見えている素材を見えている量で混ぜる）、`color`＝`back_color` の単色。`blur` は半径（画面の高さに対する比） |
+  | `anchor` / `hold` / `seconds` | 縮む区間だけ。縮んだ矩形の真ん中の高さ、画面ぜんたいのまま止まる秒数、縮む秒数 |
+  | `direction` / `item` / `gap` | 流れだけ。`up` / `down`、素材の幅（列の幅に対する比）、素材の間（画面の高さに対する比） |
+  | `speed` | 流れだけ。画面の高さ／秒。0（既定）なら最初の素材が入ってから最後の素材が出きるまでで区間の尺ちょうど。書けば並びを繰り返して埋める |
+  | `jitter` / `seed` | 流れだけ。流れる向きと直交する向き（横）の位置を、列の空きのうちどれだけばらつかせるか（0..1）。同じ `seed` なら同じばらつき |
+  | `edge_fade` / `loop` | 流れだけ。上下の端で薄れる幅、動画の素材を繰り返すか（しなければ最後のコマで止まる） |
 
   曲の終わりに届かない並び・短すぎる区間・無いセクションは全部並べて断る（黙って伸ばさ
   ない）。`keys` と `files.opening` / `closing` とは一緒に使えない（どれも背景か頭と
@@ -409,7 +433,7 @@ AST で実測する。**「そう書いた」では足りないので、破っ�
 
 ```
   0  architecture / dims / lyrics / beats / video / grade / doc / digest / jev
- 5   lines                        ← 歌詞の行の時刻
+ 5   lines / motion               ← 歌詞の行の時刻 / reel の区間の動き
  10  policy / mood / elements / pace / tempo / casting / structure / scenes / overlay
      sync / windows / audience / scenery / backdrop / reel / roll / crt
                                   ← 互いに知らない
@@ -463,6 +487,7 @@ scenery     キー画像 → Jev（目印の箱と、effect をどこに添え�
 placement   キー画像の解析 → effect の置き場所の引数
 backdrop    セクションごとのキー画像 → 背景の動画
 reel        背景の区間の並び（mp4・GIF / 画像）→ 背景の動画
+motion      reel の区間の動き（全面から縮む / 縮んだ矩形が帯のように流れる）
 roll        歌詞をエンドロール / クレジットのように流す
 grade       画面ぜんたいの色調（灰色・セピア）
 crt         ブラウン管の走査線と、上下へ流れる明るい帯

@@ -12,10 +12,15 @@ Opening → 静止画 → Closing はその1つの書き方にすぎない。区
 何本でも、どの順でも並べられる。`video` はアニメーション GIF でもいい（`video.ANIMATED`）。
 
 - **mp4 はその尺。** 曲の終わりを越える最後の mp4 だけ曲の終わりで切る
+- **`"loop": true` の mp4 は繰り返して、画像と同じく `until` まで**
 - **画像は `until` まで。** セクション名（その区間が始まった後に最初に終わる、その名前の
   セクションの終わりまで——`Instrumental Break` のように同じ名前が何度あってもいい）か秒。
-  `until` を書かない画像は「残り全部」で、並びに1つだけ置ける。その後ろは mp4 だけ
-  （尺が決まっているので、曲の終わりから逆に置ける。Closing の形）
+  `until` を書かない画像は「残り全部」で、並びに1つだけ置ける。その後ろは尺の決まった
+  mp4 だけ（曲の終わりから逆に置ける。Closing の形）。ループする mp4・流れ（`flow`）も
+  画像と同じく `until` まで、書かなければ残り全部
+- **`motion` で区間の絵を動く矩形にする**（`motion.py`）。画像・mp4 は画面ぜんたいを
+  覆ってから縮んで移る。`{"flow": [素材, ...]}` の区間は、素材が縮んだ矩形になって
+  歌詞の帯のように流れる
 - **`in` はその区間の入り方。** `transition`（`video.TRANSITIONS`、既定 `fade`）で `seconds`
   秒かけて前の区間から移る。移り終えた時刻が区切りの時刻になる——前の区間はそこまで
   見え、入ってくる区間は `seconds` 秒早く始まる。書かなければ切り替え
@@ -25,18 +30,24 @@ Opening → 静止画 → Closing はその1つの書き方にすぎない。区
 """
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
-from . import digest, video
+from . import digest, motion, video
 from .doc import is_number, notes_dropped
 from .lyrics import Song
 
-#: 区間に書けるもの
-IMAGE_KEYS = ("image", "until", "in")
-VIDEO_KEYS = ("video", "in")
+#: 区間の種類 → 書けるもの
+KEYS: Mapping[str, tuple[str, ...]] = MappingProxyType({
+    "image": ("image", "until", "in", "motion"),
+    "video": ("video", "loop", "until", "in", "motion"),
+    "flow": ("flow", "until", "in", "motion"),
+})
 #: `in` に書けるもの
 IN_KEYS = ("transition", "seconds")
 
@@ -45,11 +56,24 @@ IN_KEYS = ("transition", "seconds")
 class Segment:
     """並びの1区間。`path` は絶対パス。"""
 
-    kind: str                       # "image" / "video"
-    path: str
+    kind: str                       # "image" / "video" / "flow"
+    path: str                       # flow では使わない（""）
     until: str | float | None = None
     transition: str = "fade"
     seconds: float = 0.0
+    loop: bool = False              # mp4 を繰り返して until まで
+    items: tuple[str, ...] = ()     # flow の素材（絶対パス）
+    #: `motion` の中身（既定値で埋めた項目の組）。無ければ動かない
+    motion: tuple[tuple[str, Any], ...] | None = None
+
+    @property
+    def fills(self) -> bool:
+        """尺を `until`（無ければ残り全部）で決める区間か。尺の決まった mp4 だけ違う。"""
+        return self.kind != "video" or self.loop
+
+    @property
+    def files(self) -> tuple[str, ...]:
+        return self.items if self.kind == "flow" else (self.path,)
 
 
 @dataclass(frozen=True)
@@ -78,16 +102,34 @@ def _in_problems(at: str, doc: Any) -> list[str]:
     return bad
 
 
+def _kind(doc: Mapping[str, Any]) -> str:
+    return next(k for k in KEYS if k in doc)
+
+
+def _files_problems(at: str, kind: str, doc: Mapping[str, Any], root: Path) -> list[str]:
+    name = {"image": "画像", "video": "動画", "flow": "素材"}[kind]
+    files = doc[kind] if kind == "flow" else [doc[kind]]
+    if kind == "flow" and (not isinstance(files, list) or not files):
+        return ["%s.flow は流す素材の並び（1つ以上）" % at]
+    return ["%s の%sが無い: %s" % (at, name, f) for f in files
+            if not isinstance(f, str) or not (root / f).is_file()]
+
+
 def _segment_problems(i: int, doc: Any, root: Path) -> list[str]:
     at = "reel[%d]" % i
-    if not isinstance(doc, Mapping) or len({"image", "video"} & set(doc)) != 1:
-        return ['%s は {"image": 画像, "until": ...} か {"video": 動画}' % at]
+    if not isinstance(doc, Mapping) or len(set(KEYS) & set(doc)) != 1:
+        return ['%s は {"image": 画像, "until": ...} か {"video": 動画} か {"flow": [素材, ...]}'
+                % at]
     doc = notes_dropped(doc)
-    kind = "image" if "image" in doc else "video"
-    keys = IMAGE_KEYS if kind == "image" else VIDEO_KEYS
-    bad = ["%s の知らない項目: %s" % (at, k) for k in sorted(set(doc) - set(keys))]
-    if not isinstance(doc[kind], str) or not (root / doc[kind]).is_file():
-        bad.append("%s の%sが無い: %s" % (at, "画像" if kind == "image" else "動画", doc[kind]))
+    kind = _kind(doc)
+    bad = ["%s の知らない項目: %s" % (at, k) for k in sorted(set(doc) - set(KEYS[kind]))]
+    bad += _files_problems(at, kind, doc, root)
+    if "loop" in doc and not isinstance(doc["loop"], bool):
+        bad.append("%s.loop は true / false" % at)
+    if kind == "video" and "until" in doc and doc.get("loop") is not True:
+        bad.append("%s.until は繰り返す動画（\"loop\": true）だけ。mp4 はその尺" % at)
+    if "motion" in doc:
+        bad += motion.problems(doc["motion"], "flow" if kind == "flow" else "shrink", at)
     until = doc.get("until")
     if until is not None and not isinstance(until, str) and not (is_number(until) and until > 0):
         bad.append("%s.until はセクション名か 0 より大きい秒数" % at)
@@ -104,11 +146,11 @@ def problems(doc: Any, root: Path) -> list[str]:
     if bad:
         return bad
     segs = from_list(doc, root)
-    rest = [i for i, s in enumerate(segs) if s.kind == "image" and s.until is None]
+    rest = [i for i, s in enumerate(segs) if s.fills and s.until is None]
     if len(rest) > 1:
-        bad.append("reel: until の無い画像（残り全部）は1つだけ: %s" % rest)
-    if rest and any(s.kind != "video" for s in segs[rest[0] + 1:]):
-        bad.append("reel: 残り全部の画像より後ろは mp4 だけ（尺で曲の終わりから置く）")
+        bad.append("reel: until の無い区間（残り全部）は1つだけ: %s" % rest)
+    if rest and any(s.fills for s in segs[rest[0] + 1:]):
+        bad.append("reel: 残り全部の区間より後ろは繰り返さない mp4 だけ（尺で曲の終わりから置く）")
     return bad
 
 
@@ -116,10 +158,15 @@ def from_list(doc: Sequence[Mapping[str, Any]], root: Path) -> tuple[Segment, ..
     out = []
     for d in doc:
         d = notes_dropped(d)
-        kind = "image" if "image" in d else "video"
+        kind = _kind(d)
         cfg = notes_dropped(d.get("in", {}))
-        out.append(Segment(kind, str((root / d[kind]).resolve()), d.get("until"),
-                           cfg.get("transition", "fade"), float(cfg.get("seconds", 0.0))))
+        items = tuple(str((root / f).resolve()) for f in d["flow"]) if kind == "flow" else ()
+        moves = motion.options(d.get("motion"), "flow" if kind == "flow" else "shrink") \
+            if "motion" in d or kind == "flow" else None
+        out.append(Segment(kind, "" if kind == "flow" else str((root / d[kind]).resolve()),
+                           d.get("until"), cfg.get("transition", "fade"),
+                           float(cfg.get("seconds", 0.0)), bool(d.get("loop", False)), items,
+                           moves))
     return tuple(out)
 
 
@@ -136,7 +183,7 @@ def _section_end(song: Song, name: str, after: int, fps: int, song_f: int) -> in
 def _end(seg: Segment, f0: int, song: Song, fps: int, song_f: int,
          length: Callable[[str], int]) -> int | str:
     """区間の終わりのフレーム。決められなければ理由。"""
-    if seg.kind == "video":
+    if not seg.fills:
         return f0 + length(seg.path)
     if isinstance(seg.until, str):
         end = _section_end(song, seg.until, f0, fps, song_f)
@@ -146,7 +193,7 @@ def _end(seg: Segment, f0: int, song: Song, fps: int, song_f: int,
 
 def _backward(tail: Sequence[Segment], song_f: int, fps: int,
               length: Callable[[str], int]) -> list[tuple[int, int]]:
-    """残り全部の画像より後ろの mp4 を、曲の終わりから逆に置く → [(f0, f1)]。"""
+    """残り全部の区間より後ろの mp4 を、曲の終わりから逆に置く → [(f0, f1)]。"""
     out, end = [], song_f
     for seg in reversed(tail):
         f0 = end - length(seg.path)
@@ -159,7 +206,7 @@ def place(segs: Sequence[Segment], song: Song, song_f: int, fps: int,
           length: Callable[[str], int] | None = None) -> list[Span]:
     """区間を時間に置く。曲の終わり `song_f` に届かない・尺の足りない区間は全部並べて断る。"""
     length = length or (lambda p: video.frames_of(p, fps))
-    rest = next((i for i, s in enumerate(segs) if s.kind == "image" and s.until is None), None)
+    rest = next((i for i, s in enumerate(segs) if s.fills and s.until is None), None)
     tail = _backward(segs[rest + 1:], song_f, fps, length) if rest is not None else []
     ends: list[int | str] = []
     cur = 0
@@ -203,20 +250,37 @@ def _checked(segs: Sequence[Segment], ends: Sequence[int | str], song_f: int,
 def record(spans: Sequence[Span], frames: int, fps: int,
            size: tuple[int, int]) -> dict[str, Any]:
     """作り直すかを決める記録。ファイルは中身のハッシュで持つ。"""
-    digest = {s.seg.path: digest.sha256(s.seg.path)
-              for s in spans}
-    return {"spans": [[s.seg.kind, s.seg.path, digest[s.seg.path], s.f0, s.frames, s.overlap,
-                       s.seg.transition] for s in spans],
-            "frames": frames, "fps": fps, "size": list(size), "crf": video.CRF}
+    sums = {p: digest.sha256(p) for s in spans for p in s.seg.files}
+    return {"spans": [[s.seg.kind, [[p, sums[p]] for p in s.seg.files], s.f0, s.frames,
+                       s.overlap, s.seg.transition, s.seg.loop,
+                       dict(s.seg.motion) if s.seg.motion is not None else None]
+                      for s in spans],
+            "frames": frames, "fps": fps, "size": list(size), "crf": video.CRF,
+            "motion_crf": motion.CRF}
 
 
 def write(dst: str, spans: Sequence[Span], frames: int, fps: int,
           size: tuple[int, int]) -> str:
     """背景の動画を書く。最後の区間は `frames`（曲の尺＋余白）まで伸ばす
-    （画像はそのまま、mp4 は最後のフレームで止める）。"""
+    （画像はそのまま、mp4 は最後のフレームで止める）。`motion` のある区間は先に
+    動きを描いた動画にしてからつなぐ。"""
     lengths = [s.frames for s in spans]
     lengths[-1] = frames - spans[-1].f0
-    sources = [video.source(s.seg.path, s.seg.kind == "image", fps, n, size)
-               for s, n in zip(spans, lengths)]
-    return video.chain(sources, lengths, [s.overlap for s in spans],
-                       [s.seg.transition for s in spans], fps, dst, size)
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(dst))) as tmp:
+        sources = [_source(s, n, fps, size, os.path.join(tmp, "motion%d.mp4" % i))
+                   for i, (s, n) in enumerate(zip(spans, lengths))]
+        return video.chain(sources, lengths, [s.overlap for s in spans],
+                           [s.seg.transition for s in spans], fps, dst, size)
+
+
+def _source(span: Span, frames: int, fps: int, size: tuple[int, int],
+            tmp: str) -> video.Source:
+    """区間1つを `chain` に渡す形に。動くなら先に描く。"""
+    seg = span.seg
+    if seg.motion is None:
+        return video.source(seg.path, seg.kind == "image", fps, frames, size, seg.loop)
+    cfg = dict(seg.motion)
+    pics = motion.flow_frames(seg.items, cfg, size, fps, frames, span.overlap) \
+        if seg.kind == "flow" else \
+        motion.shrink_frames(seg.path, cfg, seg.loop, size, fps, frames, span.overlap)
+    return video.source(motion.write(tmp, pics, size, fps), False, fps, frames, size)

@@ -31,8 +31,9 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "digest": 0,          # ファイルの中身のハッシュ
     "jev": 0,             # Jev の呼び方と応答の読み方。質問は持たない
 
-    # 5 — 歌詞の行の時刻（lines.json）
+    # 5 — 歌詞の行の時刻（lines.json）と、reel の区間の動き。互いに知らない
     "lines": 5,
+    "motion": 5,          # reel の区間を動く矩形に（全面から縮む / 帯のように流れる）
 
     # 10 — 次元や歌詞を使う判断。互いに知らない
     "policy": 10,         # 感情 → 見た目。描画を知らない
@@ -49,7 +50,7 @@ LAYERS: Mapping[str, int] = MappingProxyType({
     "audience": 10,       # 聴衆の映像 → Jev（区間ごとの盛り上がり）。時刻合わせは知らない
     "scenery": 10,        # キー画像 → Jev（目印の場所と、effect をどこに添えるか）
     "backdrop": 10,       # セクションごとのキー画像 → 背景の動画
-    "reel": 10,           # 背景の区間の並び（mp4 / 画像）→ 背景の動画
+    "reel": 10,           # 背景の区間の並び（mp4・GIF / 画像）→ 背景の動画
     "roll": 10,           # 歌詞をエンドロールのように流す
     "crt": 10,            # ブラウン管の走査線と明るい帯（重ねる絵と位置の式）
 

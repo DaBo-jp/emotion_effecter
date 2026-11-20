@@ -315,16 +315,18 @@ def _join(srcs: Sequence[Source], frames: Sequence[int], overlaps: Sequence[int]
     return dst
 
 
-def source(src: str, still: bool, fps: int, frames: int, size: tuple[int, int]) -> Source:
+def source(src: str, still: bool, fps: int, frames: int, size: tuple[int, int],
+           loop: bool = False) -> Source:
     """`chain` に渡す1本：(入力の引数, フィルタ)。画面 `size` を覆うように拡大して中央で
     切り、ちょうど `frames` フレームに。動画が足りなければ最後のフレームで止める。
-    アニメーション GIF も動画として読む（透けたところは黒）。"""
+    アニメーション GIF も動画として読む（透けたところは黒）。`loop` なら動画を繰り返す。"""
     fit = _fit(size)
     if still:
         # 1回だけ縮めて、そのフレームを繰り返す（毎フレーム読み直すと14倍遅い）
         return ["-i", src], "%s,loop=loop=%d:size=1:start=0,setpts=N/%d/TB,fps=%d" % (
             fit, frames - 1, fps, fps)
-    return ["-i", src], "fps=%d,%s%s,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d" % (
+    head = ["-stream_loop", "-1"] if loop else []
+    return [*head, "-i", src], "fps=%d,%s%s,tpad=stop_mode=clone:stop=-1,trim=end_frame=%d" % (
         fps, _opaque(src), fit, frames)
 
 
